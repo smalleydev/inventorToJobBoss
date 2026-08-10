@@ -1,0 +1,33 @@
+# --- Python (jl_check, bompush_service) -------------------------------
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.env
+
+# --- .NET / VB.NET (BomPushAddIn) --------------------------------------
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# --- IDE ----------------------------------------------------------------
+.vscode/
+.idea/
+
+# --- OS noise -------------------------------------------------------------
+Thumbs.db
+.DS_Store
+
+# --- Local/runtime artifacts that should never be tracked ---------------
+# JL Check's own session persistence lives under %LOCALAPPDATA%, outside
+# this repo — nothing here to ignore for that. Any local scratch/test
+# output dropped inside the repo by accident (e.g. a stray exported
+# .json from test_write_quote.py) should be caught here too:
+*.log

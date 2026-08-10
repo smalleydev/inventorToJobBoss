@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Addin Type="Standard">
+	<ClassId>{32A24226-7D2C-4A55-84DB-98868513CBFE}</ClassId>
+	<ClientId>{32A24226-7D2C-4A55-84DB-98868513CBFE}</ClientId>
+	<DisplayName>BOM Push to JobBOSS</DisplayName>
+	<Description>Pushes Inventor assembly BOM to JobBOSS quote</Description>
+	<Assembly>BomPushAddIn.dll</Assembly>
+	<OSType>Win64</OSType>
+	<LoadAutomatically>1</LoadAutomatically>
+	<UserUnloadable>1</UserUnloadable>
+	<Hidden>0</Hidden>
+	<SupportedSoftwareVersionGreaterThan>16..</SupportedSoftwareVersionGreaterThan>
+</Addin>

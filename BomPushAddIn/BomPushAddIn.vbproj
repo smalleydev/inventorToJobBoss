@@ -1,0 +1,29 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<RootNamespace>BomPushAddIn</RootNamespace>
+		<TargetFramework>net8.0-windows</TargetFramework>
+		<UseWindowsForms>true</UseWindowsForms>
+		<OutputType>Library</OutputType>
+
+		<!-- Flatten output so Inventor finds the DLL directly, no extra
+         net8.0-windows subfolder in the path -->
+		<AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+		<BaseOutputPath>bin\</BaseOutputPath>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<Reference Include="Autodesk.Inventor.Interop">
+			<HintPath>C:\Program Files\Autodesk\Inventor 2026\Bin\Public Assemblies\Autodesk.Inventor.Interop.dll</HintPath>
+			<Private>False</Private>
+			<EmbedInteropTypes>False</EmbedInteropTypes>
+		</Reference>
+	</ItemGroup>
+
+	<ItemGroup>
+		<Import Include="System" />
+		<Import Include="System.Collections.Generic" />
+		<Import Include="System.Linq" />
+	</ItemGroup>
+
+</Project>
