@@ -133,8 +133,11 @@ Public Class StandardAddInServer
     ''' </summary>
     Private Sub LaunchJlCheck(jsonPath As String)
 
-        Const JlCheckPythonExe As String = "C:\Users\lstrain\source\jl_check\venv\Scripts\pythonw.exe"
-        Const JlCheckMainScript As String = "C:\Users\lstrain\source\jl_check\main.py"
+        ' Path was C:\Users\lstrain\source\jl_check\... until the repo
+        ' consolidation into InventorToJobBoss (jl_check, bompush_service,
+        ' and this add-in as siblings under one repo) — updated to match.
+        Const JlCheckPythonExe As String = "C:\Users\lstrain\source\InventorToJobBoss\jl_check\venv\Scripts\pythonw.exe"
+        Const JlCheckMainScript As String = "C:\Users\lstrain\source\InventorToJobBoss\jl_check\main.py"
 
         Try
             Dim psi As New System.Diagnostics.ProcessStartInfo With {

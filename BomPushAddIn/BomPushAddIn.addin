@@ -4,7 +4,7 @@
 	<ClientId>{32A24226-7D2C-4A55-84DB-98868513CBFE}</ClientId>
 	<DisplayName>BOM Push to JobBOSS</DisplayName>
 	<Description>Pushes Inventor assembly BOM to JobBOSS quote</Description>
-	<Assembly>BomPushAddIn.dll</Assembly>
+	<Assembly>\\SYS\sys\BOMIntegration\Releases\BomPushAddIn\BomPushAddIn.dll</Assembly>
 	<OSType>Win64</OSType>
 	<LoadAutomatically>1</LoadAutomatically>
 	<UserUnloadable>1</UserUnloadable>
