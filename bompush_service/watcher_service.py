@@ -43,21 +43,48 @@ from db import get_connection
 from quote_writer import QuoteLine, write_quote
 from staging import insert_staging_details, mark_error, mark_imported, try_claim_quote
 
-INBOX_PATH = Path(r"C:\TEMP\jb_inbox")
-PROCESSING_PATH = INBOX_PATH / "processing"
-PROCESSED_PATH = INBOX_PATH / "processed"
-ERROR_PATH = INBOX_PATH / "error"
+# Shared location IT provisioned (\\SYS\sys\BOMIntegration). Per their
+# explicit instruction, the watcher uses the UNC path, not the F:
+# mapped drive — a mapped drive letter is a per-user-session convenience
+# and isn't guaranteed to exist/resolve the same way for a service
+# account running unattended.
+BOM_INTEGRATION_ROOT = Path(r"\\SYS\sys\BOMIntegration")
+
+# These are SIBLING folders directly under the root — matches IT's real
+# provisioned structure exactly (NOT nested inside Incoming the way an
+# earlier version of this file had them as inbox/processing/processed/
+# error subfolders).
+INBOX_PATH = BOM_INTEGRATION_ROOT / "Incoming"
+PROCESSING_PATH = BOM_INTEGRATION_ROOT / "Processing"
+PROCESSED_PATH = BOM_INTEGRATION_ROOT / "Completed"
+ERROR_PATH = BOM_INTEGRATION_ROOT / "Error"
+LOGS_PATH = BOM_INTEGRATION_ROOT / "Logs"
 
 # How long to wait after seeing a file-creation event before touching the
 # file, so a still-in-progress write (JL Check's json.dump) has time to
 # finish and flush before we try to read it.
 DEBOUNCE_SECONDS = 1.0
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)-7s  %(message)s",
-)
 log = logging.getLogger("bompush_service")
+log.setLevel(logging.INFO)
+_log_formatter = logging.Formatter("%(asctime)s  %(levelname)-7s  %(message)s")
+
+_console_handler = logging.StreamHandler()
+_console_handler.setFormatter(_log_formatter)
+log.addHandler(_console_handler)
+
+# File logging into IT's provisioned Logs folder — best-effort. A
+# network hiccup or permissions issue on the share shouldn't take the
+# whole service down; console logging alone is still enough to debug a
+# live session, so this degrades gracefully rather than crashing at
+# startup.
+try:
+    LOGS_PATH.mkdir(parents=True, exist_ok=True)
+    _file_handler = logging.FileHandler(LOGS_PATH / "bompush_service.log", encoding="utf-8")
+    _file_handler.setFormatter(_log_formatter)
+    log.addHandler(_file_handler)
+except OSError:
+    log.warning(f"Could not set up file logging in {LOGS_PATH} — continuing with console logging only.")
 
 
 def _ensure_folders() -> None:
