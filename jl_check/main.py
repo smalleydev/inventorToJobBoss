@@ -213,8 +213,11 @@ def _to_export_row(row: dict) -> dict:
 
 class MainWindow(QMainWindow):
 
-    # Directory the push service watches for approved exports.
-    INBOX_PATH = Path(r"C:\TEMP\jb_inbox")
+    # Directory the push service watches for approved exports — the
+    # "Incoming" sibling folder under IT's provisioned share, per the
+    # UNC path they explicitly asked us to use over the F: mapped drive.
+    # Must stay in sync with watcher_service.py's INBOX_PATH.
+    INBOX_PATH = Path(r"\\SYS\sys\BOMIntegration") / "Incoming"
 
     # Where in-progress session state is saved, keyed by source filename
     # — a separate concept from the JobBOSS inbox above, purely local
