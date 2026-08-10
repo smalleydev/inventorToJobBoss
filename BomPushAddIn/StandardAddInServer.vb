@@ -133,16 +133,18 @@ Public Class StandardAddInServer
     ''' </summary>
     Private Sub LaunchJlCheck(jsonPath As String)
 
-        ' Path was C:\Users\lstrain\source\jl_check\... until the repo
-        ' consolidation into InventorToJobBoss (jl_check, bompush_service,
-        ' and this add-in as siblings under one repo) — updated to match.
-        Const JlCheckPythonExe As String = "C:\Users\lstrain\source\InventorToJobBoss\jl_check\venv\Scripts\pythonw.exe"
-        Const JlCheckMainScript As String = "C:\Users\lstrain\source\InventorToJobBoss\jl_check\main.py"
+        ' Launches the packaged JLCheck.exe directly from the shared
+        ' release location — no per-engineer Python/venv required
+        ' anymore. main.py (now bundled inside the exe via PyInstaller)
+        ' still reads argv(1) as the BOM JSON path the same way it did
+        ' when launched via pythonw.exe, so passing it through as the
+        ' only argument here is unchanged.
+        Const JlCheckExe As String = "\\SYS\sys\BOMIntegration\Releases\BOMFormatter\JLCheck.exe"
 
         Try
             Dim psi As New System.Diagnostics.ProcessStartInfo With {
-                .FileName = JlCheckPythonExe,
-                .Arguments = $"""{JlCheckMainScript}"" ""{jsonPath}""",
+                .FileName = JlCheckExe,
+                .Arguments = $"""{jsonPath}""",
                 .UseShellExecute = False
             }
             System.Diagnostics.Process.Start(psi)
