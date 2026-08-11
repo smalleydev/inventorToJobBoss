@@ -1,11 +1,14 @@
 # --- Python (jl_check, bompush_service) -------------------------------
 venv/
+bompush_service/build/
+bompush_service/dist/
 .venv/
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 *.egg-info/
+*.spec
 .pytest_cache/
 .mypy_cache/
 .env
