@@ -11,7 +11,7 @@ any of the three projects in this repo (`jl_check`, `bompush_service`,
 | `C:\Users\lstrain\source\InventorToJobBoss` | Where you actually develop | Edit here. Never edited on F:\. |
 | GitHub (`smalleydev/inventorToJobBoss`) | Source of truth | Every real change passes through here. |
 | `F:\BOMIntegration\Git\inventorToJobBoss` | Stable mirror | Pull-only. Never developed on, never built from directly. |
-| `F:\BOMIntegration\Service\Watchdog`, `Releases\BOMFormatter`, `Releases\BomPushAddIn` | Deployed/running copies | Populated only from a local build of `F:\Git`, never from `C:\` dev directly. |
+| `F:\BOMIntegration\Service\Watchdog`, `Releases\BOMFormatter`, `Releases\BomPushAddIn` | Deployed/running copies | Populated only from a local build of `F:\Git`, never from `C:\` dev directly. `Service\Watchdog` specifically holds `bompush_watcher.exe` — the file the `BomPushWatcher` Windows Service actually runs. |
 
 The chain is always: **`C:\` dev → GitHub → `F:\Git` → local build →
 deployed location.** Skipping a hop (e.g. copying straight from `C:\`
@@ -127,34 +127,68 @@ Not every change needs this step — a fix that only affects local dev
 tooling (e.g. `db_test.py`) doesn't need rebuilding or redeploying
 anywhere. Skip to Step 7 if nothing shared changed.
 
-### 6a — `bompush_service` (no build step — it runs as raw Python)
+### 6a — `bompush_service` (PyInstaller build, runs as a Windows Service)
 
 ```
-robocopy F:\BOMIntegration\Git\inventorToJobBoss\bompush_service C:\BomPushService /MIR /XD __pycache__ venv .venv /XF *.pyc
-```
-
-**Why local disk (`C:\BomPushService`), not run directly off `F:\Git`
-or `Service\Watchdog`:** a live Python process importing modules over a
-network share is fragile — slower I/O, and a share hiccup can crash or
-hang a process that's supposed to run unattended. `/MIR` (not `/E`)
-because this should be an exact mirror — old files that no longer
-exist in source shouldn't linger in the deployed copy.
-
-If `requirements.txt` changed:
-```
-cd C:\BomPushService
+cd F:\BOMIntegration\Git\inventorToJobBoss\bompush_service
+python -m venv venv
 venv\Scripts\activate
-pip install -r requirements.txt
+pip install pyodbc watchdog pyinstaller
+pyinstaller --onefile --console --name bompush_watcher --hidden-import watchdog.observers.winapi watcher_service.py
 ```
 
-**Restart the service** (stop the running `python watcher_service.py`
-with Ctrl+C, start it again) — it doesn't hot-reload.
+**Why `--hidden-import watchdog.observers.winapi` specifically:**
+`watchdog` uses Windows-native file-watching APIs that PyInstaller's
+automatic dependency scan doesn't reliably catch on its own — without
+this flag, the build succeeds but can fail at runtime on a machine with
+no Python installed to silently fall back on.
 
-**Check:** startup log line should show it watching the correct UNC
-`Incoming` path. Do a real end-to-end test — Finalize a BOM from JL
-Check, confirm the file gets claimed and moves to `Completed` (or
-`Error` with a real reason), and confirm a matching line appears in
-`\\SYS\sys\BOMIntegration\Logs\bompush_service.log`.
+**Why `--console`, not `--windowed`** (unlike `JLCheck.exe` below):
+NSSM redirects the process's stdout/stderr to log files (see the
+service config below) — a console subsystem build is what makes that
+redirection work at all. `--windowed` would have no console streams to
+redirect in the first place.
+
+**Check before deploying — don't skip this**, same reasoning as 6b:
+```
+.\dist\bompush_watcher.exe
+```
+Confirm it starts, prints the "Watching..." line, and reaches TESTPROD
+— then Ctrl+C it before continuing.
+
+```
+robocopy F:\BOMIntegration\Git\inventorToJobBoss\bompush_service\dist F:\BOMIntegration\Service\Watchdog bompush_watcher.exe
+```
+
+**Updating the running service after a rebuild:**
+```
+Stop-Service BomPushWatcher
+# (the robocopy above — will fail/retry if the old exe is still locked
+#  by a running process, same as the DLL-lock issue in 6c; the Stop-Service
+#  above should release it, but confirm before retrying if robocopy stalls)
+Start-Service BomPushWatcher
+Get-Service BomPushWatcher
+```
+
+**Check:** `Get-Service BomPushWatcher` shows `Running`, and
+`\\SYS\sys\BOMIntegration\Logs\service_stdout.log` picks up a fresh
+"Watching..." line after the restart. Do a real end-to-end test —
+Finalize a BOM from JL Check, confirm the file gets claimed and moves
+to `Completed` (or `Error` with a real reason).
+
+**The service itself is configured once, not on every deploy** — only
+the `.exe` gets replaced above. For reference, the working NSSM
+configuration:
+```
+$nssm = "$env:LOCALAPPDATA\Microsoft\WinGet\Packages\NSSM.NSSM_Microsoft.Winget.Source_8wekyb3d8bbwe\nssm-2.24-101-g897c7ad\win64\nssm.exe"
+& $nssm install BomPushWatcher "\\SYS\sys\BOMIntegration\Service\Watchdog\bompush_watcher.exe"
+& $nssm set BomPushWatcher AppDirectory "\\SYS\sys\BOMIntegration\Service\Watchdog"
+& $nssm set BomPushWatcher AppStdout "\\SYS\sys\BOMIntegration\Logs\service_stdout.log"
+& $nssm set BomPushWatcher AppStderr "\\SYS\sys\BOMIntegration\Logs\service_stderr.log"
+& $nssm set BomPushWatcher ObjectName "SMALLEY\svc_BOMWatchdog" "<password>"
+```
+See *Known pitfalls* below — several of these lines exist specifically
+because the naive/obvious version silently fails.
 
 ### 6b — `jl_check` (PyInstaller build)
 
@@ -263,3 +297,44 @@ share on every launch.
 - **A multi-line `git add` can silently split across commands** if
   pasted oddly — always confirm with `git status` before committing,
   not after.
+- **NSSM's own executable must live somewhere permanent and shared**,
+  never under a personal profile (e.g. `$env:LOCALAPPDATA\...\WinGet\
+  Packages\...`). Windows' Service Control Manager launches `nssm.exe`
+  *itself* as the service binary, which then spawns the target `.exe`
+  as a child process — so if `nssm.exe` is only reachable from your own
+  login, the service can never start under a *different* account,
+  regardless of how correctly everything else (password, share
+  permissions) is configured. This one cost the most debugging time of
+  anything in this section — every other symptom (logon failures,
+  access-denied errors) looked like the real problem until this was
+  found. Copy `nssm.exe` to a shared location (e.g. alongside
+  `Service\Watchdog`) before installing the service.
+- **A service account needs real NTFS/share permissions on wherever
+  the `.exe` and its logs live** — separate from, and in addition to,
+  any SQL Server grant it has. "Access is denied" (Event ID 7000, no
+  logon-failure detail) after the account authenticates successfully
+  is this, not a password problem.
+- **Mapped drive letters (`F:`) don't work from a service context** —
+  confirmed two ways: an elevated PowerShell session can't even see
+  `F:` at all (different session token than your interactive login),
+  and more importantly a Windows Service itself has no concept of your
+  session's drive mappings regardless of elevation. Always configure
+  NSSM with the UNC path (`\\SYS\sys\BOMIntegration\...`), never `F:\`.
+- **`nssm edit`'s GUI can silently fail to set a password** —
+  `ChangeServiceConfig(): The parameter is incorrect`, even after
+  confirming the "Log on as a service" right was granted correctly. Use
+  the command-line form instead, which works reliably:
+  `nssm set <ServiceName> ObjectName "DOMAIN\account" "password"`.
+- **A permission grant may not take effect immediately for a service
+  account** — a fresh reboot (not just waiting) was what actually
+  cleared a stale "Access is denied" after a share permission was
+  granted; a plain retry a few minutes later was not enough on its own
+  in practice.
+- **`Start-Service`'s own PowerShell error never contains the real
+  reason a service failed to start** — always check
+  `Get-WinEvent -LogName System -MaxEvents 5 | Where-Object {$_.Message
+  -like "*<ServiceName>*"} | Format-List TimeCreated, Id, Message`
+  instead. Event ID 7038 = bad password specifically; 7000 with no
+  7038 alongside it = something else (commonly file/share access);
+  7034 = the process started but then crashed (check the NSSM
+  `AppStderr` log for the actual exception in that case).

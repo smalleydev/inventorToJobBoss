@@ -327,6 +327,20 @@ Two different combining strategies, depending on category:
 
 ### 4. The watcher (`bompush_service`)
 
+**Hosting:** packaged via PyInstaller (`--onefile --console`) into
+`bompush_watcher.exe`, run as a real Windows Service (`BomPushWatcher`,
+via NSSM) under a dedicated account, `SMALLEY\svc_BOMWatchdog` — not a
+personal login, and not a raw `python watcher_service.py` process left
+running in a terminal. This supersedes an earlier deployment model
+(raw Python from local disk, `C:\BomPushService`) that assumed running
+a live interpreter off a network share was too fragile; that concern
+doesn't apply once it's a single compiled binary with no per-file
+module imports happening at runtime. See `FEATURE_WORKFLOW.md` Step 6a
+for the actual build/deploy steps, and its *Known pitfalls* section for
+the real, hard-won lessons from getting the Windows Service piece
+working (service-account permissions, NSSM's own install location,
+password-setting quirks).
+
 Runs as a `watchdog`-based filesystem observer against
 `\\SYS\sys\BOMIntegration\Incoming`, with a startup sweep for files
 already sitting there when the service starts (watchdog only reports
