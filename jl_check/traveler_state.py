@@ -35,10 +35,10 @@ Rule order in compute_traveler_state:
      never recomputed off of it — a custom line has no MatchStatus in
      the matching sense, no Category, nothing else in this function
      applies to it.
-  3. Missing part number ("NA") -> Needs Attention, unconditionally,
-     even if the vendor number/Material field resolved cleanly on its
-     own. A part with no real Inventor part number is worth a human
-     glance regardless of how well the rest of it matched.
+  3. Missing part number ("NA") -> Needs Attention, UNLESS the Material
+     field starts with "VENDOR " (e.g. "VENDOR 11-0341"), which marks
+     expected vendor-numbered hardware that legitimately has no Inventor
+     part number. That case falls through to normal rules 5-8 instead.
   4. UHMW (needs_review_uhmw) -> Needs Attention, unconditionally, even
      if its shape code makes Category read as SHEET/PLATE — UHMW always
      needs a human regardless of shape code (see jobboss_lookup.py).
@@ -147,17 +147,21 @@ def compute_traveler_state(row: dict) -> str:
         return "Custom"
 
     # 3. Missing part number — Inventor had no real part number for this
-    # item (typically vendor hardware identified only by its Material/
-    # vendor field; see jobboss_lookup.py's "NA" test case). Even if
-    # that vendor number happens to resolve cleanly (exact_vendor, or
-    # now escapes SHEET/PLATE auto-ignore via an exact match under rule
-    # 5), a missing part number is itself worth a human glance, so it
-    # forces Needs Attention regardless of MatchStatus or Category.
+    # item. Forces Needs Attention regardless of MatchStatus or Category,
+    # UNLESS the Material field identifies it as vendor-numbered hardware
+    # (starts with "VENDOR ", e.g. "VENDOR 11-0341") — that's an expected,
+    # legitimate NA case (vendor parts have no Inventor part number by
+    # design), not a data gap worth a human glance. In that case we fall
+    # through to the normal rules below (5-8), so an exact vendor match
+    # still resolves to Clean/Attended while an unresolved one still
+    # correctly lands in Needs Attention via rule 6.
     # Checked after explicit engineer actions (manual override, ignore,
     # custom line) — those still win — but before everything else, so
-    # it's never silently resolved away.
+    # a genuinely missing part number is never silently resolved away.
     if (row.get("PartNumber") or "").strip().upper() == "NA":
-        return "Needs Attention"
+        material = (row.get("Material") or "").strip().upper()
+        if not material.startswith("VENDOR "):
+            return "Needs Attention"
 
     # 4. UHMW always needs a human, full stop — jobboss_lookup.py routes
     # it to needs_review_uhmw regardless of shape code, specifically
