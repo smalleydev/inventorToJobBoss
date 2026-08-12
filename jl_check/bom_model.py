@@ -149,6 +149,19 @@ class BomTableModel(QAbstractTableModel):
         row_data = self._rows[index.row()]
 
         if role in (Qt.DisplayRole, Qt.EditRole):
+            # Manually-resolved rows show the CORRECTED match in the
+            # Material column rather than the original raw Inventor
+            # string — the engineer picked a specific JobBOSS material
+            # via the resolve dialog, and the table should reflect that
+            # choice at a glance. row_data["Material"] itself is never
+            # overwritten (see resolve_dialog.py), so the raw value is
+            # still there if this resolution ever needs to be reverted.
+            if key == "Material" and row_data.get("MatchStatus") in (
+                "resolved_manual", "resolved_manual_raw_stock"
+            ) and row_data.get("JobBossMaterial"):
+                jb_number = row_data["JobBossMaterial"]
+                jb_desc = row_data.get("JobBossDescription") or ""
+                return f"{jb_number} — {jb_desc}" if jb_desc else jb_number
             return row_data.get(key, "")
         
         if role == Qt.ToolTipRole:

@@ -340,10 +340,24 @@ class ResolveDialog(QDialog):
             return
 
         is_raw_stock = item.data(Qt.UserRole + 1) or False
+        material_number = item.data(Qt.UserRole)
+
+        # Fetch the matched material's real description so the working
+        # table can display the correction in-line (see bom_model.py's
+        # Material-column override). The original row["Material"] (raw
+        # Inventor string) is deliberately left untouched here — it's
+        # the only way back if this resolution ever needs to be undone.
+        self._cursor.execute(
+            "SELECT Description FROM Material WHERE Material = ?",
+            material_number,
+        )
+        material_row = self._cursor.fetchone()
+        material_description = material_row.Description if material_row else ""
 
         self._resolution = {
             "MatchStatus": "resolved_manual_raw_stock" if is_raw_stock else "resolved_manual",
-            "JobBossMaterial": item.data(Qt.UserRole),
+            "JobBossMaterial": material_number,
+            "JobBossDescription": material_description,
             "ConflictNotes": None,
             "HasConflict": False,
         }
