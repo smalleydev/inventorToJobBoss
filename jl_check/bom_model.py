@@ -149,19 +149,31 @@ class BomTableModel(QAbstractTableModel):
         row_data = self._rows[index.row()]
 
         if role in (Qt.DisplayRole, Qt.EditRole):
-            # Manually-resolved rows show the CORRECTED match in the
-            # Material column rather than the original raw Inventor
-            # string — the engineer picked a specific JobBOSS material
-            # via the resolve dialog, and the table should reflect that
-            # choice at a glance. row_data["Material"] itself is never
-            # overwritten (see resolve_dialog.py), so the raw value is
-            # still there if this resolution ever needs to be reverted.
-            if key == "Material" and row_data.get("MatchStatus") in (
+            # Manually-resolved rows display the CORRECTED JobBOSS match
+            # instead of the original raw Inventor data — the engineer
+            # picked a specific material via the resolve dialog, and the
+            # table should reflect that choice at a glance:
+            #   Part Number -> the resolved JobBOSS material number
+            #   Description -> that material's real JobBOSS description
+            #   Material    -> literal "---" (no longer meaningful once
+            #                  resolved; the raw string lives on in
+            #                  row_data["Material"] itself, untouched,
+            #                  for revert purposes)
+            # None of row_data's underlying keys are overwritten here —
+            # this is display-only, so reverting a resolution is just a
+            # matter of changing MatchStatus/JobBossMaterial back.
+            is_resolved_manual = row_data.get("MatchStatus") in (
                 "resolved_manual", "resolved_manual_raw_stock"
-            ) and row_data.get("JobBossMaterial"):
-                jb_number = row_data["JobBossMaterial"]
-                jb_desc = row_data.get("JobBossDescription") or ""
-                return f"{jb_number} — {jb_desc}" if jb_desc else jb_number
+            ) and row_data.get("JobBossMaterial")
+
+            if is_resolved_manual:
+                if key == "PartNumber":
+                    return row_data["JobBossMaterial"]
+                if key == "Description":
+                    return row_data.get("JobBossDescription") or row_data.get("Description", "")
+                if key == "Material":
+                    return "---"
+
             return row_data.get(key, "")
         
         if role == Qt.ToolTipRole:
