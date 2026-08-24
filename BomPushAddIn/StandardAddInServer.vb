@@ -139,8 +139,7 @@ Public Class StandardAddInServer
         ' still reads argv(1) as the BOM JSON path the same way it did
         ' when launched via pythonw.exe, so passing it through as the
         ' only argument here is unchanged.
-        Const JlCheckExe As String = "\\SYS\sys\BOMIntegration\Releases\BOMFormatter\ProductionPilot\JLCheck.exe"
-
+        Const JlCheckExe As String = "\\SYS\sys\BOMIntegration\Releases\BOMFormatter\JLCheck.exe"
         Try
             Dim psi As New System.Diagnostics.ProcessStartInfo With {
                 .FileName = JlCheckExe,

@@ -30,6 +30,22 @@ CONN_STR = (
 # silently accepted.
 EXPECTED_DATABASE = "PRODUCTION"
 
+# --- TESTPROD (feature-branch use only) ---------------------------------
+# main now points at PRODUCTION by default following the production pilot
+# approval. For TESTPROD work, branch off main, uncomment this block and
+# comment out the PRODUCTION block above, then revert before merging back.
+#
+# CONN_STR = (
+#     "Driver={ODBC Driver 18 for SQL Server};"
+#     "Server=JBSERVER\\SQLEXPRESS;"
+#     "Database=TESTPROD;"
+#     "Trusted_Connection=Yes;"
+#     "Encrypt=Yes;"
+#     "TrustServerCertificate=Yes;"
+# )
+#
+# EXPECTED_DATABASE = "TESTPROD"
+
 
 def get_connection() -> pyodbc.Connection:
     """
