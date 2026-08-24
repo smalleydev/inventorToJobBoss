@@ -96,6 +96,13 @@ def main():
             conn.commit()
             print("Committed.")
             verify_in_search_view(cursor, quote_number)
+
+            test_guard = input(
+                "\nTest overwrite guard now by attempting a second write "
+                f"to '{quote_number}'? (yes/no): "
+            )
+            if test_guard.strip().lower() == "yes":
+                test_overwrite_guard(quote_number, lines, payload)
         else:
             conn.rollback()
             print("Rolled back — nothing was written.")
@@ -107,6 +114,39 @@ def main():
     finally:
         conn.close()
 
+def test_overwrite_guard(quote_number: str, lines: list[QuoteLine], payload: dict) -> None:
+    """
+    Attempts a second write_quote() call against the same quote_number
+    that was just committed. Expects a ValueError from the new
+    pre-write existence check — confirms the guard actually blocks a
+    duplicate rather than silently succeeding. Always rolls back
+    regardless of outcome, since this is a negative test — nothing from
+    this attempt should ever be committed.
+    """
+    conn = get_connection()
+    conn.autocommit = False
+    cursor = conn.cursor()
+
+    print(f"\n=== Testing overwrite guard: second write to '{quote_number}' ===")
+    try:
+        write_quote(
+            cursor,
+            quote_number=quote_number,
+            part_number=quote_number,
+            description=f"DUPLICATE TEST — should never commit",
+            lines=lines,
+        )
+        print("  FAIL — second write succeeded. Guard did not trigger.")
+    except ValueError as exc:
+        print(f"  PASS — guard raised ValueError as expected:\n    {exc}")
+    except Exception as exc:
+        print(f"  FAIL — unexpected exception type ({type(exc).__name__}):\n    {exc}")
+    finally:
+        conn.rollback()
+        cursor.execute("SELECT Quote FROM Quote WHERE RFQ = ?", quote_number)
+        count = len(cursor.fetchall())
+        print(f"  Post-test check: {count} Quote row(s) under this RFQ (should be 1, from the first commit).")
+        conn.close()
 
 if __name__ == "__main__":
     main()
