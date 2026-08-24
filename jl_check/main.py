@@ -32,8 +32,8 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QActionGroup, QCloseEvent
 from PySide6.QtWidgets import (
-    QApplication, QFileDialog, QHeaderView, QLabel, QMainWindow, QMenu,
-    QMessageBox, QProgressBar, QPushButton, QSplitter, QTableView,
+    QApplication, QFileDialog, QHeaderView, QInputDialog, QLabel, QMainWindow,
+    QMenu, QMessageBox, QProgressBar, QPushButton, QSplitter, QTableView,
     QVBoxLayout, QWidget,
 )
 
@@ -752,7 +752,40 @@ class MainWindow(QMainWindow):
                                  "Import a BOM before finalizing.")
             return
 
-        quote_number = self._quote_number_from_loaded_file()
+        default_quote_number = self._quote_number_from_loaded_file()
+        quote_number, ok = QInputDialog.getText(
+            self, "Quote Number",
+            "Quote number for this push:",
+            text=default_quote_number,
+        )
+        if not ok:
+            return
+        quote_number = quote_number.strip().upper()
+        if not quote_number:
+            QMessageBox.warning(self, "Quote number required",
+                                 "Quote number cannot be blank.")
+            return
+
+        # --- Pre-check: does JobBOSS already have a Quote under this number? ---
+        # Separate from the BOM_Staging_Header check below, which only
+        # tracks pushes made through THIS pipeline. This queries JobBOSS's
+        # actual Quote table directly — catches a manually-entered quote,
+        # or one from any other source, that our staging table has never
+        # heard of. No unlock/override path here: the existing quote must
+        # be deleted in JobBOSS itself before this tool will write to this
+        # quote number.
+        self.cursor.execute("SELECT Quote FROM Quote WHERE RFQ = ?", quote_number)
+        existing_jobboss_quotes = self.cursor.fetchall()
+        if existing_jobboss_quotes:
+            QMessageBox.critical(
+                self, "Quote already exists in JobBOSS",
+                f"Quote number '{quote_number}' already has "
+                f"{len(existing_jobboss_quotes)} existing quote record(s) "
+                f"in JobBOSS.\n\nThis tool will not write a second quote "
+                f"under the same number. Delete the existing quote in "
+                f"JobBOSS first, or use a different quote number."
+            )
+            return
 
         # --- Pre-check: is this quote number already locked? -----------
         # Catches the case up front, before doing any nesting/export

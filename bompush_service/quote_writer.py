@@ -267,6 +267,24 @@ def write_quote(cursor, quote_number: str, part_number: str,
             quote_number, quoted_by,
         )
 
+    # --- 1b. Block if a Quote already exists under this quote number -------
+    # Distinct from the RFQ check above: an RFQ row existing is expected
+    # and fine to reuse. A Quote row existing means real quote data is
+    # already here — possibly written by this pipeline, possibly entered
+    # manually in the JobBOSS client, possibly from any other source.
+    # Either way, inserting another Quote under the same RFQ would not
+    # replace it — JobBOSS legitimately allows multiple Quote children per
+    # RFQ — so silently proceeding would duplicate, not overwrite. Refuse.
+    cursor.execute("SELECT Quote FROM Quote WHERE RFQ = ?", quote_number)
+    existing_quotes = [row.Quote for row in cursor.fetchall()]
+    if existing_quotes:
+        raise ValueError(
+            f"Quote number '{quote_number}' already has {len(existing_quotes)} "
+            f"existing Quote record(s) in JobBOSS. Refusing to write a "
+            f"duplicate — choose a different quote number, or resolve the "
+            f"existing quote in JobBOSS first."
+        )
+
     # --- 2. Single Quote row (self-referencing) ------------------------------
     quote_guid = f"{{{uuid.uuid4()}}}"
 
