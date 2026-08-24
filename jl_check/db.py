@@ -17,7 +17,7 @@ import pyodbc
 CONN_STR = (
     "Driver={ODBC Driver 18 for SQL Server};"
     "Server=JBSERVER\\SQLEXPRESS;"
-    "Database=TESTPROD;"
+    "Database=PRODUCTION;"
     "Trusted_Connection=Yes;"
     "Encrypt=Yes;"
     "TrustServerCertificate=Yes;"
@@ -28,7 +28,7 @@ CONN_STR = (
 # this is a deliberate safety check, so a typo'd or copy-pasted connection
 # string pointing at PRODUCTION gets caught immediately instead of
 # silently accepted.
-EXPECTED_DATABASE = "TESTPROD"
+EXPECTED_DATABASE = "PRODUCTION"
 
 
 def get_connection() -> pyodbc.Connection:
