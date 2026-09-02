@@ -52,9 +52,10 @@ Rule order in compute_traveler_state:
      field starts with "VENDOR " (e.g. "VENDOR 11-0341"), which marks
      expected vendor-numbered hardware that legitimately has no Inventor
      part number. That case falls through to normal rules 5-8 instead.
-  4. UHMW (needs_review_uhmw) -> Needs Attention, unconditionally, even
-     if its shape code makes Category read as SHEET/PLATE — UHMW always
-     needs a human regardless of shape code (see jobboss_lookup.py).
+  4. UHMW and Lexan (needs_review_uhmw / needs_review_lexan, see
+     SPECIAL_REVIEW_STATUSES) -> Needs Attention, unconditionally, even
+     if shape code makes Category read as SHEET/PLATE — both always
+     need a human regardless of shape code (see jobboss_lookup.py).
      Must come before rule 5, or it gets silently swallowed into
      Ignored.
   5. SHEET/PLATE -> Ignored (dropped from export, handled by the sheet
@@ -96,18 +97,25 @@ Rule order in compute_traveler_state:
 # number (or vendor number, or an embedded JB# reference) matched a
 # real Material row directly, as opposed to being inferred from a
 # shape-code description (raw_stock_match) or left for a human
-# (ambiguous / needs_review_uhmw / not_found). Used to let an
-# exact-matched sheet/plate part escape the normal SHEET/PLATE
-# auto-ignore in rule 4.
+# (ambiguous / needs_review_uhmw / needs_review_lexan / not_found).
+# Used to let an exact-matched sheet/plate part escape the normal
+# SHEET/PLATE auto-ignore in rule 4.
 EXACT_MATCH_STATUSES = frozenset({"exact_part", "exact_vendor", "jb_reference"})
+
+# Statuses jobboss_lookup.py routes to unconditionally when the
+# material's own keyword marks it as a plastic that always needs a
+# human, regardless of shape code (UHMW: "UHMW"; Lexan: "LEX") — see
+# rule 4. Kept as one set so a future addition of the same kind (a
+# third such keyword) only needs to change jobboss_lookup.py plus this
+# one line, not every place that currently special-cases "uhmw".
+SPECIAL_REVIEW_STATUSES = frozenset({"needs_review_uhmw", "needs_review_lexan"})
 
 # MatchStatus values that mean "no confirmed JobBOSS material yet".
 UNRESOLVED_STATUSES = frozenset({
     "ambiguous",
-    "needs_review_uhmw",
     "not_found",
     "new_material_needed",
-})
+}) | SPECIAL_REVIEW_STATUSES
 
 # Categories excluded from the JobBOSS export entirely.
 EXCLUDED_CATEGORIES = frozenset({"SHEET", "PLATE"})
@@ -183,14 +191,14 @@ def compute_traveler_state(row: dict) -> str:
         if not material.startswith("VENDOR "):
             return "Needs Attention"
 
-    # 4. UHMW always needs a human, full stop — jobboss_lookup.py routes
-    # it to needs_review_uhmw regardless of shape code, specifically
-    # because UHMW can carry a SHEET/PLATE shape code (e.g. "UHMW SH .5
-    # X 48 X 120...") without actually being sheet-metal-team material.
-    # Must be checked BEFORE the SHEET/PLATE auto-ignore below, or a
-    # UHMW row with shape code SH/PL gets silently swallowed into
-    # Ignored instead of surfacing for review.
-    if status == "needs_review_uhmw":
+    # 4. UHMW and Lexan always need a human, full stop — jobboss_lookup.py
+    # routes them to needs_review_uhmw / needs_review_lexan regardless of
+    # shape code, specifically because both can carry a SHEET/PLATE shape
+    # code (e.g. "UHMW SH .5 X 48 X 120...", "LEX SH .25 X 48 X 96...")
+    # without actually being sheet-metal-team material. Must be checked
+    # BEFORE the SHEET/PLATE auto-ignore below, or a row like this gets
+    # silently swallowed into Ignored instead of surfacing for review.
+    if status in SPECIAL_REVIEW_STATUSES:
         return "Needs Attention"
 
     # 5. Sheet/plate: excluded from the export, handled by the sheet

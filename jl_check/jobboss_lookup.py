@@ -28,8 +28,11 @@ Match priority, per part:
      ending in the actual JobBOSS material number, e.g.
      "SS SH 10GA X 48 X 120 T304 2B 28-0003" -> "28-0003". Applies to
      sheet (SH), plate (PL), tube (TU), and angle (AN) shape codes.
-     UHMW is excluded from auto-resolution regardless of shape code and
-     always routed to a human (needs_review_uhmw).
+     UHMW and Lexan (key word "LEX") are both excluded from
+     auto-resolution regardless of shape code and always routed to a
+     human (needs_review_uhmw / needs_review_lexan) — same treatment,
+     separate status so each keeps its own identity through the rest
+     of the pipeline.
   5. Progressive prefix search: truncate the part number at each
      trailing hyphen segment (never below the first two segments) and
      search for anything starting with that base. Skipped for
@@ -45,6 +48,12 @@ Match priority, per part:
 
 If nothing matches, the part is unmatched (not_found) and needs full
 manual resolution via the dialog.
+
+Every match that resolves to a real Material row also carries that
+row's Stocked_UofM (LookupResult.matched_uofm) — traveler_state.py uses
+it to require a cut length whenever the resolved material is stocked by
+a linear unit (feet/inches), regardless of Category or how the match
+was made.
 """
 
 import re
@@ -101,13 +110,18 @@ class LookupResult:
       exact_vendor      — vendor number (Material field) matched directly
       jb_reference      — embedded JB# cross-reference matched
       raw_stock_match   — trailing raw-stock number matched
-      ambiguous         — prefix search found candidates; human must pick
-      needs_review_uhmw — UHMW stock; human must confirm even if matched
-      not_found         — nothing matched anywhere
+      ambiguous          — prefix search found candidates; human must pick
+      needs_review_uhmw  — UHMW stock; human must confirm even if matched
+      needs_review_lexan — Lexan stock; same treatment as UHMW
+      not_found          — nothing matched anywhere
+
+    matched_uofm is the matched Material row's Stocked_UofM (e.g. "FT",
+    "IN", "EA") whenever matched_material is set — None otherwise.
     """
     status: str
     matched_material: str | None = None
     matched_description: str | None = None
+    matched_uofm: str | None = None
     candidates: list[MaterialCandidate] = field(default_factory=list)
     searched_prefix: str | None = None
 
@@ -141,9 +155,11 @@ def _has_shape_code(material_field: str, code: str) -> bool:
 
 def _fetch_material(cursor, material_number: str):
     """Exact-match fetch of one Material row (or None). Centralizes the
-    query all five lookup steps share."""
+    query all five lookup steps share. Stocked_UofM is pulled alongside
+    Material/Description so every caller can populate
+    LookupResult.matched_uofm without a second round trip."""
     cursor.execute(
-        "SELECT Material, Description FROM Material WHERE Material = ?",
+        "SELECT Material, Description, Stocked_UofM FROM Material WHERE Material = ?",
         material_number,
     )
     return cursor.fetchone()
@@ -198,6 +214,7 @@ def lookup_material(cursor, part_number: str, material_field: str,
                 status="exact_part",
                 matched_material=row.Material,
                 matched_description=row.Description,
+                matched_uofm=row.Stocked_UofM,
             )
 
     # --- 2. Exact match on the vendor number (Material field) -----------
@@ -209,6 +226,7 @@ def lookup_material(cursor, part_number: str, material_field: str,
                 status="exact_vendor",
                 matched_material=row.Material,
                 matched_description=row.Description,
+                matched_uofm=row.Stocked_UofM,
             )
 
     # --- 3. Embedded JB# reference in the description --------------------
@@ -221,6 +239,7 @@ def lookup_material(cursor, part_number: str, material_field: str,
                     status="jb_reference",
                     matched_material=row.Material,
                     matched_description=row.Description,
+                    matched_uofm=row.Stocked_UofM,
                 )
             # JB# present but broken — fall through rather than trust it.
 
@@ -232,6 +251,7 @@ def lookup_material(cursor, part_number: str, material_field: str,
 
     if material_field:
         is_uhmw = "UHMW" in material_field.upper()
+        is_lexan = "LEX" in material_field.upper()
         is_sheet_or_plate = any(
             _has_shape_code(material_field, code) for code in SHEET_PLATE_SHAPE_CODES
         )
@@ -252,6 +272,19 @@ def lookup_material(cursor, part_number: str, material_field: str,
                     status="needs_review_uhmw",
                     matched_material=row.Material if row else None,
                     matched_description=row.Description if row else None,
+                    matched_uofm=row.Stocked_UofM if row else None,
+                )
+
+            if is_lexan:
+                # Lexan gets the exact same treatment as UHMW above —
+                # never auto-resolves, even though its shape code (SH)
+                # would otherwise read as ordinary sheet raw stock.
+                row = _fetch_material(cursor, trailing_number)
+                return LookupResult(
+                    status="needs_review_lexan",
+                    matched_material=row.Material if row else None,
+                    matched_description=row.Description if row else None,
+                    matched_uofm=row.Stocked_UofM if row else None,
                 )
 
             if is_raw_stock:
@@ -261,6 +294,7 @@ def lookup_material(cursor, part_number: str, material_field: str,
                         status="raw_stock_match",
                         matched_material=row.Material,
                         matched_description=row.Description,
+                        matched_uofm=row.Stocked_UofM,
                     )
 
     # Sheet/plate skip the step-5 gate entirely: they're dropped from the
@@ -325,6 +359,7 @@ if __name__ == "__main__":
         ("20-0259", "VENDOR 20-0259", ""),                                   # exact_part
         ("28229-01-005", "SS SH 10GA X 60 X 120 T304 2B 28-0420", ""),       # job-specific raw_stock
         ("028-300-01-30", "UHMW SH 1 X 48 X 120 18-0025", ""),               # needs_review_uhmw
+        ("028-301-01-30", "LEX SH .25 X 48 X 96 18-0030", ""),               # needs_review_lexan
         ("028-0854-0045-SS01", "SS BR RD .75 T304 28-0153",
          "STAND-OFF, .75 X .375 X 1/4-20 (JB# 028-381)"),                    # jb_reference
         ("28229-01-105", "SS AN 3 X 3 X .25 T304 28-0063", ""),              # job-specific angle raw_stock
@@ -339,7 +374,8 @@ if __name__ == "__main__":
         print(f"  job_specific: {is_job_specific_part_number(pn)}")
         print(f"  status: {result.status}")
         if result.matched_material:
-            print(f"  matched: {result.matched_material} — {result.matched_description}")
+            print(f"  matched: {result.matched_material} — {result.matched_description} "
+                  f"(UofM: {result.matched_uofm})")
         if result.candidates:
             print(f"  searched prefix: {result.searched_prefix}")
             for c in result.candidates[:10]:

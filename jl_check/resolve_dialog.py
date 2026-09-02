@@ -36,6 +36,11 @@ DETAIL_FIELDS = [
     "Make_Buy", "Stocked_UofM", "Primary_Vendor", "Vendor_Reference",
 ]
 
+# Statuses jobboss_lookup.py assigns to a plastic that always needs a
+# human even when it already carries a pre-matched material (UHMW, and
+# Lexan — key word "LEX") — mirrors traveler_state.SPECIAL_REVIEW_STATUSES.
+SPECIAL_REVIEW_STATUSES = ("needs_review_uhmw", "needs_review_lexan")
+
 # Cap on manual search results.
 MAX_SEARCH_RESULTS = 50
 
@@ -245,8 +250,8 @@ class ResolveDialog(QDialog):
     def _populate_candidates_tab(self) -> None:
         """Fill the Candidates tab from what the lookup already found.
         `Candidates` on the row is a list of (number, description) pairs
-        stashed by the walk for ambiguous results; UHMW rows carry a
-        single pre-matched material needing confirmation instead."""
+        stashed by the walk for ambiguous results; UHMW/Lexan rows carry
+        a single pre-matched material needing confirmation instead."""
 
         for candidate in self._row.get("Candidates") or []:
             if isinstance(candidate, (list, tuple)):
@@ -257,7 +262,7 @@ class ResolveDialog(QDialog):
                 number, description, is_raw_stock = candidate, "", False
             self.candidates_list.addItem(self._make_result_item(number, description, is_raw_stock))
 
-        if (self._row.get("MatchStatus") == "needs_review_uhmw"
+        if (self._row.get("MatchStatus") in SPECIAL_REVIEW_STATUSES
                 and self._row.get("JobBossMaterial")):
             self.candidates_list.addItem(self._make_result_item(
                 self._row["JobBossMaterial"], "(raw stock match, needs confirmation)"
@@ -342,22 +347,27 @@ class ResolveDialog(QDialog):
         is_raw_stock = item.data(Qt.UserRole + 1) or False
         material_number = item.data(Qt.UserRole)
 
-        # Fetch the matched material's real description so the working
-        # table can display the correction in-line (see bom_model.py's
-        # Material-column override). The original row["Material"] (raw
-        # Inventor string) is deliberately left untouched here — it's
-        # the only way back if this resolution ever needs to be undone.
+        # Fetch the matched material's real description (and stocked
+        # UofM) so the working table can display the correction in-line
+        # (see bom_model.py's Material-column override) and so
+        # traveler_state.py can demand a length whenever this material
+        # is stocked by a linear unit (feet/inches), regardless of
+        # Category. The original row["Material"] (raw Inventor string)
+        # is deliberately left untouched here — it's the only way back
+        # if this resolution ever needs to be undone.
         self._cursor.execute(
-            "SELECT Description FROM Material WHERE Material = ?",
+            "SELECT Description, Stocked_UofM FROM Material WHERE Material = ?",
             material_number,
         )
         material_row = self._cursor.fetchone()
         material_description = material_row.Description if material_row else ""
+        material_uofm = material_row.Stocked_UofM if material_row else None
 
         self._resolution = {
             "MatchStatus": "resolved_manual_raw_stock" if is_raw_stock else "resolved_manual",
             "JobBossMaterial": material_number,
             "JobBossDescription": material_description,
+            "JobBossUofM": material_uofm,
             "ConflictNotes": None,
             "HasConflict": False,
         }
@@ -367,6 +377,7 @@ class ResolveDialog(QDialog):
         self._resolution = {
             "MatchStatus": "manually_ignored",
             "JobBossMaterial": None,
+            "JobBossUofM": None,
             "ConflictNotes": "Manually ignored by engineer — excluded from JobBOSS export",
             "HasConflict": False,
         }
@@ -392,6 +403,7 @@ class ResolveDialog(QDialog):
         self._resolution = {
             "MatchStatus": "custom_line",
             "JobBossMaterial": result["Id"],
+            "JobBossUofM": None,
             "Description": result["Description"],
             "ExtDescription": result["ExtDescription"],
             "ConflictNotes": None,

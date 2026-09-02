@@ -57,7 +57,7 @@ AUTO_RESOLVE_STATUSES = frozenset({
 
 # Statuses that open the resolve dialog on double-click.
 NEEDS_RESOLUTION_STATUSES = frozenset({
-    "ambiguous", "needs_review_uhmw", "not_found",
+    "ambiguous", "needs_review_uhmw", "needs_review_lexan", "not_found",
 })
 
 # Categories whose length-bearing rows go through stock nesting at
