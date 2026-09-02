@@ -81,10 +81,34 @@ EXPORT_FIELDS = (
 # everything else leaves it unset.
 
 
-def _get_stick_length(cursor, jobboss_material: str) -> float:
+# Every length JL Check works with internally (CutLengthIn, piece
+# lengths for nesting) is in inches. Material.IS_Length, though, is
+# stored in whatever unit that material is actually stocked in
+# (Stocked_UofM — "ft", "in", "ea", "pack") — a bar stocked by the foot
+# has its stick length recorded in feet, not inches. Convert on the way
+# in rather than assuming inches, or nesting silently compares inch
+# piece lengths against a foot-denominated stick and over/under-counts
+# sticks needed by 12x.
+INCHES_PER_FOOT = 12
+
+
+def _stick_length_to_inches(value: float, uofm: str | None) -> float:
+    """Convert a JobBOSS length value to inches based on the material's
+    Stocked_UofM. Only "ft" needs conversion — "in" (and anything else,
+    which shouldn't reach here; see LENGTH_REQUIRED_UOFM in
+    traveler_state.py) is already inches."""
+    if (uofm or "").strip().upper() == "FT":
+        return value * INCHES_PER_FOOT
+    return value
+
+
+def _get_stick_length(cursor, jobboss_material: str, uofm: str | None) -> float:
     """Look up the standard stick/bar length for a material from
     Material.IS_Length — confirmed against the JobBOSS calculator's own
-    'Bar Length' field for several real materials."""
+    'Bar Length' field for several real materials — and convert it to
+    inches per `uofm` (the material's own Stocked_UofM, as already
+    resolved onto the row / see traveler_state.JobBossUofM) so it can be
+    compared against inch-denominated piece lengths."""
     cursor.execute(
         "SELECT IS_Length FROM Material WHERE Material = ?", jobboss_material
     )
@@ -94,7 +118,7 @@ def _get_stick_length(cursor, jobboss_material: str) -> float:
             f"Material '{jobboss_material}' has no IS_Length (stick length) "
             f"set in JobBOSS — cannot nest cuts for this material."
         )
-    return float(row.IS_Length)
+    return _stick_length_to_inches(float(row.IS_Length), uofm)
 
 
 def _combine_rows(rows: list[dict], cursor) -> list[dict]:
@@ -168,7 +192,12 @@ def _combine_rows(rows: list[dict], cursor) -> list[dict]:
 
     for material_key, group in nest_groups.items():
         pieces = expand_pieces(group)
-        stick_length = _get_stick_length(cursor, material_key)
+        # Use the UofM already resolved onto these rows (walk or resolve
+        # dialog) rather than re-querying it — same value the Needs
+        # Length gate in traveler_state.py used to get here in the first
+        # place, so the two stay consistent.
+        uofm = group[0].get("JobBossUofM")
+        stick_length = _get_stick_length(cursor, material_key, uofm)
         result = nest_pieces(pieces, stick_length_in=stick_length)
 
         part_numbers = [r.get("PartNumber", "") for r in group]
@@ -548,8 +577,13 @@ class MainWindow(QMainWindow):
 
             if result.status in AUTO_RESOLVE_STATUSES:
                 resolved["JobBossMaterial"] = result.matched_material
+                # Stocked_UofM off the matched Material row — traveler_state.py
+                # uses this to require a cut length whenever the material is
+                # stocked by a linear unit (feet/inches), regardless of Category.
+                resolved["JobBossUofM"] = result.matched_uofm
             else:
                 resolved["JobBossMaterial"] = None
+                resolved["JobBossUofM"] = None
                 # Stash candidates for the resolve dialog's Candidates tab.
                 resolved["Candidates"] = [
                     (c.material_number, c.description, c.is_raw_stock)

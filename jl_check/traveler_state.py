@@ -6,10 +6,13 @@ final JobBOSS traveler:
 
   Needs Attention  (red)    — no confirmed JobBOSS material yet; a human
                               must resolve it via the dialog.
-  Needs Length     (orange) — the JobBOSS material IS raw stock (matched
-                              via raw-stock extraction), and no cut length
-                              is present yet. Resolved by typing a length
-                              into the table.
+  Needs Length     (orange) — the resolved JobBOSS material demands a cut
+                              length that hasn't been entered yet. This is
+                              true whenever the material is stocked by a
+                              linear unit (Stocked_UofM is feet or inches),
+                              and — separately — whenever a linear-stock
+                              category matched via raw-stock extraction.
+                              Resolved by typing a length into the table.
   Ignored          (yellow) — EXCLUDED from the final JobBOSS export.
                               Either sheet/plate with no exact JobBOSS
                               match (handled by the sheet metal team
@@ -70,11 +73,19 @@ Rule order in compute_traveler_state:
      land in Ignored instead of getting stuck in Needs Attention.
   6. Unresolved statuses -> Needs Attention. Length is never checked
      before material identity is settled.
-  7. Linear-stock categories matched via raw-stock extraction, with no
-     length -> Needs Length. If the part number matched its own
-     dedicated JobBOSS material directly (exact_part / exact_vendor /
-     jb_reference), that's a specific stocked item, not raw stock — no
-     length is needed regardless of category.
+  7. Needs Length, checked two independent ways, either one enough:
+       a. The resolved material's own Stocked_UofM is feet or inches
+          (see LENGTH_REQUIRED_UOFM) — that material is sold by a
+          linear unit, so a length is required no matter how the match
+          was made (exact part/vendor/JB# match included) or what
+          Category says.
+       b. A linear-stock CATEGORY (LENGTH_REQUIRED_CATEGORIES) matched
+          via raw-stock extraction (RAW_STOCK_STATUSES) — the older,
+          narrower check, kept as a fallback for materials whose
+          Stocked_UofM isn't set to FT/IN in JobBOSS but are still
+          raw stock by shape code.
+     Either way, only fires once a real JobBossMaterial exists — an
+     unresolved row already stopped at rule 6.
   8. Otherwise Attended (human resolved) or Clean (auto-matched), and
      never either one without a real JobBossMaterial (belt-and-
      suspenders: if this ever falls through with no material, that's an
@@ -106,10 +117,20 @@ LENGTH_REQUIRED_CATEGORIES = frozenset({"TUBE", "ANGLE", "BAR", "ROUND BAR"})
 
 # Statuses where the JobBOSS material IS raw stock — meaning the length
 # had to come from the CAD model, not from the material record itself.
-# A part number that matched its own dedicated JobBOSS material directly
-# (exact_part / exact_vendor / jb_reference) is a specific, already-cut
-# stocked item and needs no length input at all.
+# Kept as the narrower, category-driven fallback for rule 7b; rule 7a's
+# Stocked_UofM check is the primary signal now and applies regardless of
+# MatchStatus or Category.
 RAW_STOCK_STATUSES = frozenset({"raw_stock_match", "resolved_manual_raw_stock"})
+
+# Material.Stocked_UofM values that mean "sold by a linear unit" — any
+# resolved material stocked this way demands a cut length (rule 7a),
+# full stop, regardless of Category or how the match was made. Values
+# are matched case-insensitively after stripping whitespace (JobBOSS
+# stores these lowercase — "ft", "in" — but "FT"/"IN" show up too).
+# The other UofM values seen in this JobBOSS instance, "ea" and
+# "pack"/"PACK", are deliberately absent — neither implies a linear
+# length, so they fall through to the ordinary Clean/Attended rule 8.
+LENGTH_REQUIRED_UOFM = frozenset({"FT", "IN"})
 
 # Display/sort priority: lower number sorts first. Alphabetical order
 # would bury "Needs Attention" below "Attended" — this keeps the rows
@@ -190,9 +211,22 @@ def compute_traveler_state(row: dict) -> str:
     if status in UNRESOLVED_STATUSES:
         return "Needs Attention"
 
-    # 7. Raw-stock linear items without a length aren't ready yet.
-    if category in LENGTH_REQUIRED_CATEGORIES and status in RAW_STOCK_STATUSES:
-        if row.get("CutLengthIn", 0) in (0, 0.0):
+    # 7. Needs Length — two independent triggers, either one enough.
+    # Both only apply once a real material is on the row; an unresolved
+    # lookup already returned "Needs Attention" at rule 6 above.
+    if has_material and row.get("CutLengthIn", 0) in (0, 0.0):
+        # 7a. The resolved material itself is stocked by a linear unit
+        # (feet/inches) — demands a length no matter how it was matched
+        # or what Category says. This supersedes the old assumption that
+        # an exact part/vendor/JB# match never needs one.
+        uofm = (row.get("JobBossUofM") or "").strip().upper()
+        if uofm in LENGTH_REQUIRED_UOFM:
+            return "Needs Length"
+
+        # 7b. Fallback: a linear-stock CATEGORY matched via raw-stock
+        # extraction, for materials whose Stocked_UofM isn't set to
+        # FT/IN in JobBOSS but are still raw stock by shape code.
+        if category in LENGTH_REQUIRED_CATEGORIES and status in RAW_STOCK_STATUSES:
             return "Needs Length"
 
     # 8. Done — distinguish "a human fixed this" from "matched on its
