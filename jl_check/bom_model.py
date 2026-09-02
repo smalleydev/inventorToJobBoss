@@ -175,10 +175,10 @@ class BomTableModel(QAbstractTableModel):
                     return "---"
 
             return row_data.get(key, "")
-        
+
         if role == Qt.ToolTipRole:
             return str(row_data.get(key, ""))
-        
+
         if role == Qt.FontRole and index.row() % 2 == 1:
             font = QFont()
             font.setBold(True)
@@ -281,25 +281,6 @@ class BomTableModel(QAbstractTableModel):
     def update_row(self, row: int, updates: dict) -> None:
         """Merge `updates` into an existing row's dict and repaint it."""
         self._rows[row].update(updates)
-        self._emit_row_changed(row)
-        self.row_edited.emit()
-
-    def set_manual_state(self, row: int, state: str | None) -> None:
-        """Force TravelerState to `state` (from traveler_state.ALL_STATES),
-        overriding whatever compute_traveler_state would otherwise derive
-        — used by the working table's right-click "Set State" menu. Pass
-        None to clear the override and go back to normal derivation.
-
-        Sets ManualTravelerState on the row (compute_traveler_state checks
-        it first) and recomputes TravelerState through the same function
-        everything else uses, so this stays consistent with every other
-        code path instead of hand-setting the display value directly."""
-        row_data = self._rows[row]
-        if state is None:
-            row_data.pop("ManualTravelerState", None)
-        else:
-            row_data["ManualTravelerState"] = state
-        row_data["TravelerState"] = compute_traveler_state(row_data)
         self._emit_row_changed(row)
         self.row_edited.emit()
 

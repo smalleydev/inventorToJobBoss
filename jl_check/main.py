@@ -46,7 +46,6 @@ from push_outcome_dialog import PushOutcomeDialog
 from settings import get_theme, set_theme
 from stock_nesting import expand_pieces, nest_pieces
 from theme import apply_theme
-from traveler_state import ALL_STATES as TRAVELER_ALL_STATES
 from traveler_state import SORT_ORDER as TRAVELER_STATE_SORT_ORDER
 from traveler_state import compute_traveler_state
 
@@ -617,17 +616,18 @@ class MainWindow(QMainWindow):
                 self.working_model.update_row(row_num, merged)
 
     def on_working_context_menu(self, pos) -> None:
-        """Right-click on the working table: manually force TravelerState
-        to any value (e.g. Ignored -> Needs Attention), overriding normal
-        derivation. Selecting the row's current state is harmless (just
-        re-applies the same override); "Auto (recompute)" clears the
-        override and returns the row to normal derivation."""
+        """Right-click on the working table. Currently offers only
+        "Resolve...", which re-opens the resolve dialog for the clicked
+        row regardless of its current state — the deliberate way to fix
+        a bad match after the fact. TravelerState itself is always
+        derived by compute_traveler_state() and can no longer be forced
+        by hand (the old "Set State" submenu was removed — see
+        traveler_state.py's history for why a manual override was unsafe
+        to keep around)."""
         index = self.working_view.indexAt(pos)
         if not index.isValid():
             return
         row_num = index.row()
-        row_data = self.working_model.get_row(row_num)
-        current_state = row_data.get("TravelerState")
 
         menu = QMenu(self)
 
@@ -636,27 +636,6 @@ class MainWindow(QMainWindow):
             lambda _checked=False, r=row_num: self._open_resolve_dialog(r)
         )
         menu.addAction(resolve_action)
-        menu.addSeparator()
-
-        set_state_menu = menu.addMenu("Set State")
-
-        for state in sorted(TRAVELER_ALL_STATES, key=lambda s: TRAVELER_STATE_SORT_ORDER.get(s, 99)):
-            action = QAction(state, self)
-            action.setCheckable(True)
-            action.setChecked(state == current_state)
-            action.triggered.connect(
-                lambda _checked=False, r=row_num, s=state: self.working_model.set_manual_state(r, s)
-            )
-            set_state_menu.addAction(action)
-
-        set_state_menu.addSeparator()
-        auto_action = QAction("Auto (recompute)", self)
-        auto_action.setCheckable(True)
-        auto_action.setChecked("ManualTravelerState" not in row_data)
-        auto_action.triggered.connect(
-            lambda _checked=False, r=row_num: self.working_model.set_manual_state(r, None)
-        )
-        set_state_menu.addAction(auto_action)
 
         menu.exec(self.working_view.viewport().mapToGlobal(pos))
 

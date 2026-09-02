@@ -29,6 +29,16 @@ final JobBOSS traveler:
                               as a JobBOSS Misc line rather than a
                               material-linked one.
 
+Every state above is derived — there is no way for an engineer to force
+a row directly to a given TravelerState. An earlier version had a
+right-click "Set State" override; it was removed after it let a row
+reach Finalize as Clean/Attended with no JobBossMaterial at all (see
+project notes on the 28278-01A push failure). The fix now in place is
+architectural rather than a guard: the only way to change a row's state
+is to change the facts compute_traveler_state() looks at (MatchStatus,
+JobBossMaterial, Category, CutLengthIn) via the resolve dialog or an
+inline edit.
+
 Rule order in compute_traveler_state:
   1. Explicit engineer ignore always wins.
   2. Custom line -> Custom, unconditionally. Set once at creation and
@@ -65,7 +75,10 @@ Rule order in compute_traveler_state:
      dedicated JobBOSS material directly (exact_part / exact_vendor /
      jb_reference), that's a specific stocked item, not raw stock — no
      length is needed regardless of category.
-  8. Otherwise Attended (human resolved) or Clean (auto-matched).
+  8. Otherwise Attended (human resolved) or Clean (auto-matched), and
+     never either one without a real JobBossMaterial (belt-and-
+     suspenders: if this ever falls through with no material, that's an
+     upstream bug and Needs Attention is the safe failure mode).
 """
 
 # MatchStatus values that count as an EXACT JobBOSS match — the part
@@ -98,11 +111,6 @@ LENGTH_REQUIRED_CATEGORIES = frozenset({"TUBE", "ANGLE", "BAR", "ROUND BAR"})
 # stocked item and needs no length input at all.
 RAW_STOCK_STATUSES = frozenset({"raw_stock_match", "resolved_manual_raw_stock"})
 
-# Valid TravelerState values a manual override may be set to. Kept here
-# (not just SORT_ORDER's keys) so compute_traveler_state can validate a
-# stray/garbage value in the row dict rather than trusting it blindly.
-ALL_STATES = frozenset({"Needs Attention", "Needs Length", "Ignored", "Attended", "Clean", "Custom"})
-
 # Display/sort priority: lower number sorts first. Alphabetical order
 # would bury "Needs Attention" below "Attended" — this keeps the rows
 # that need human eyes at the top. Imported by main.py; keep the state
@@ -120,21 +128,12 @@ SORT_ORDER = {
 def compute_traveler_state(row: dict) -> str:
     """Compute the Traveler State for a row dict carrying MatchStatus,
     Category, and CutLengthIn. Safe to call repeatedly — it derives the
-    state fresh from current values each time."""
+    state fresh from current values each time. There is no manual
+    override input anymore: TravelerState is always a pure function of
+    the row's other fields."""
     status = row.get("MatchStatus")
     category = row.get("Category", "")
-
-    # 0. Manual override — an engineer explicitly set the state via the
-    # working table's right-click menu (e.g. flipping a wrongly-Ignored
-    # SHEET row back to Needs Attention, or forcing a resolved row back
-    # to Needs Attention for a second look). This wins over every other
-    # rule, including the category/status-driven ones below, and stays
-    # pinned even through later inline edits (setData always calls back
-    # through this function). Cleared by picking "Auto" from the same
-    # menu, which removes ManualTravelerState from the row entirely.
-    override = row.get("ManualTravelerState")
-    if override in ALL_STATES:
-        return override
+    has_material = bool(row.get("JobBossMaterial"))
 
     # 1. Explicit engineer override — always wins.
     if status == "manually_ignored":
@@ -155,9 +154,9 @@ def compute_traveler_state(row: dict) -> str:
     # through to the normal rules below (5-8), so an exact vendor match
     # still resolves to Clean/Attended while an unresolved one still
     # correctly lands in Needs Attention via rule 6.
-    # Checked after explicit engineer actions (manual override, ignore,
-    # custom line) — those still win — but before everything else, so
-    # a genuinely missing part number is never silently resolved away.
+    # Checked after explicit engineer actions (ignore, custom line) —
+    # those still win — but before everything else, so a genuinely
+    # missing part number is never silently resolved away.
     if (row.get("PartNumber") or "").strip().upper() == "NA":
         material = (row.get("Material") or "").strip().upper()
         if not material.startswith("VENDOR "):
@@ -196,5 +195,12 @@ def compute_traveler_state(row: dict) -> str:
         if row.get("CutLengthIn", 0) in (0, 0.0):
             return "Needs Length"
 
-    # 8. Done — distinguish "a human fixed this" from "matched on its own".
+    # 8. Done — distinguish "a human fixed this" from "matched on its
+    # own". Never report Clean/Attended without a real JobBossMaterial:
+    # if this ever triggers it means something upstream (jobboss_lookup,
+    # the resolve dialog) produced an inconsistent row — Needs Attention
+    # is the safe failure mode, not a silent export.
+    if not has_material:
+        return "Needs Attention"
+
     return "Attended" if status in ("resolved_manual", "resolved_manual_raw_stock") else "Clean"
