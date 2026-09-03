@@ -79,6 +79,12 @@ EXPORT_FIELDS = (
 # a row to write as a JobBOSS Misc line rather than a material-linked
 # one. ExtDescription only ever carries a real value on those rows —
 # everything else leaves it unset.
+#
+# Author is deliberately NOT in this per-row list — every row on a BOM
+# carries the same value (the Inventor add-in stamps the top-level
+# assembly's Author iProperty onto every line, see BomExtractor), so
+# it's pulled once and sent as the payload's top-level QuotedBy instead
+# (see finalize_and_export) rather than repeated on every exported row.
 
 
 # Every length JL Check works with internally (CutLengthIn, piece
@@ -969,6 +975,17 @@ class MainWindow(QMainWindow):
 
         rows = [self.working_model.get_row(r) for r in range(self.working_model.rowCount())]
 
+        # Every row carries the same Author — the Inventor add-in reads it
+        # once from the top-level assembly document and stamps it onto
+        # every BomLineItem (see BomExtractor.TraverseBom), so any row
+        # with a non-empty one will do. Assumed to already be the
+        # engineer's JobBOSS username (e.g. "LSTRAIN") per Inventor's
+        # Author iProperty convention here — written straight through to
+        # QuotedBy below, no name-to-username lookup. None (not "") when
+        # nothing on the BOM has an Author set, so the watcher/quote_writer
+        # fall back to their own default rather than writing a blank.
+        quoted_by = next((r.get("Author") for r in rows if r.get("Author")), None)
+
         # Ignored rows never go to JobBOSS regardless (sheet/plate,
         # manually ignored). Needs Attention / Needs Length rows are
         # skipped rather than blocking finalize — the engineer can push
@@ -1009,6 +1026,7 @@ class MainWindow(QMainWindow):
         payload = {
             "QuoteNumber": quote_number,
             "SourceFile": os.path.basename(self._loaded_file_path),
+            "QuotedBy": quoted_by,
             "Rows": [_to_export_row(r) for r in combined_rows],
         }
 

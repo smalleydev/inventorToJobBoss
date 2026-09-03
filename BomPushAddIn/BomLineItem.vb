@@ -46,6 +46,16 @@ Public Class BomLineItem
     ''' Nothing, when the part has no comment.</summary>
     Public Property Comments As String
 
+    ''' <summary>Author iProperty (Summary Information property set) of
+    ''' the TOP-LEVEL ASSEMBLY document — read once in TraverseBom, not
+    ''' per-component, and stamped onto every row the same. Assumed to
+    ''' already hold the engineer's JobBOSS username (e.g. "LSTRAIN"),
+    ''' matching every other Inventor install's Author iProperty
+    ''' convention — JL Check writes this straight through to JobBOSS's
+    ''' Quoted_By with no name-to-username lookup. Empty string, never
+    ''' Nothing, when the assembly has no Author set.</summary>
+    Public Property Author As String
+
     ''' <summary>Make/Buy flag. RESERVED — not yet populated.</summary>
     Public Property MakeBuy As String
 

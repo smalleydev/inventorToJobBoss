@@ -2,11 +2,16 @@
 bompush_service — watches the shared inbox for JL Check's approved
 exports and pushes each one into JobBOSS as a real quote.
 
+Runs locally on SYS against BOM_INTEGRATION_ROOT as a local disk path
+(D:\SYS\BOMIntegration) — JL Check's client side still reaches the same
+folder over the \\SYS\sys\BOMIntegration UNC path from engineers'
+workstations, but this service itself no longer has to.
+
 Detection is two-layered: a watchdog Observer reacts to filesystem
 events as they happen (the fast path), and a plain directory listing
 sweeps the inbox every POLL_INTERVAL_SECONDS regardless (the fallback
-path) — watchdog's notifications aren't reliable over a UNC/network
-share, so the poll is what catches anything the event path ever misses.
+path) — kept as defense-in-depth even now that the service is local;
+see POLL_INTERVAL_SECONDS below for why it existed in the first place.
 Both paths funnel through the same claim-by-move-to-Processing step, so
 running both together is safe — whichever notices a file first wins.
 
@@ -51,12 +56,16 @@ from db import get_connection
 from quote_writer import QuoteLine, write_quote
 from staging import insert_staging_details, mark_error, mark_imported, try_claim_quote
 
-# Shared location IT provisioned (\\SYS\sys\BOMIntegration). Per their
-# explicit instruction, the watcher uses the UNC path, not the F:
-# mapped drive — a mapped drive letter is a per-user-session convenience
-# and isn't guaranteed to exist/resolve the same way for a service
-# account running unattended.
-BOM_INTEGRATION_ROOT = Path(r"\\SYS\sys\BOMIntegration")
+# Shared location IT provisioned. The service now runs ON SYS itself
+# (moved off an engineer's workstation, which previously had no choice
+# but to reach it over the network), so this is the LOCAL disk path to
+# the same folder tree, not the \\SYS\sys\BOMIntegration UNC path JL
+# Check's client side still uses from remote workstations (see
+# main.py's INBOX_PATH — that one stays UNC; it has to cross the
+# network from wherever an engineer is running JL Check). Only this
+# service's own path changes, since only this service is now local to
+# the machine that folder actually lives on.
+BOM_INTEGRATION_ROOT = Path(r"D:\SYS\BOMIntegration")
 
 # These are SIBLING folders directly under the root — matches IT's real
 # provisioned structure exactly (NOT nested inside Incoming the way an
@@ -74,12 +83,15 @@ LOGS_PATH = BOM_INTEGRATION_ROOT / "Logs"
 DEBOUNCE_SECONDS = 1.0
 
 # How often the fallback poll sweeps the inbox, independent of watchdog
-# events entirely. watchdog's file-system notifications (ReadDirectory-
-# ChangesW on Windows) are not reliable over a UNC/network share like
-# BOM_INTEGRATION_ROOT — a share hiccup, a redirector cache, or a write
-# pattern the OS just doesn't surface a notification for can leave a
-# file sitting in the inbox with the watcher never told it arrived. This
-# poll is the safety net for that: it reuses the exact same startup-sweep
+# events entirely. This was added while the service ran on an engineer's
+# workstation watching BOM_INTEGRATION_ROOT over a UNC/network share —
+# watchdog's ReadDirectoryChangesW notifications are known to be
+# unreliable over a network share, so this poll was the safety net for a
+# missed event. Now that the service runs locally on SYS against a local
+# disk path, that specific failure mode goes away, but the poll stays as
+# cheap, harmless defense-in-depth (AV interference, a sync tool
+# touching the folder, anything else that could eat a local notification
+# too) — this reuses the exact same startup-sweep
 # logic (process_existing_files) on a timer, so a missed event is caught
 # within one interval instead of sitting there until the service is
 # restarted. The event-driven path stays primary — this only ever picks
@@ -207,18 +219,32 @@ def process_file(path: Path) -> None:
         insert_staging_details(cursor, quote_number, payload["Rows"])
 
         lines = _build_lines(payload)
+
+        # QuotedBy comes from the Inventor add-in's Author iProperty read
+        # (the top-level assembly's Author, stamped onto every BomLineItem
+        # — see BomExtractor.TraverseBom), carried through JL Check's
+        # Finalize export as payload["QuotedBy"]. Falls back to
+        # write_quote()'s own default when it's missing or blank — an
+        # older export predating this field, or an assembly with no
+        # Author iProperty set at all.
+        quoted_by_kwargs = {}
+        if payload.get("QuotedBy"):
+            quoted_by_kwargs["quoted_by"] = payload["QuotedBy"]
+
         quote_guid = write_quote(
             cursor,
             quote_number=quote_number,
             part_number=quote_number,
             description=f"Imported from {payload.get('SourceFile', '')}",
             lines=lines,
+            **quoted_by_kwargs,
         )
 
         conn.commit()
         mark_imported(cursor, quote_number, quote_guid)
 
-        log.info(f"Wrote quote '{quote_number}' ({len(lines)} lines), GUID {quote_guid}")
+        log.info(f"Wrote quote '{quote_number}' ({len(lines)} lines), GUID {quote_guid}, "
+                 f"Quoted_By {quoted_by_kwargs.get('quoted_by', '(default)')}")
         _move_to(path, PROCESSED_PATH)
 
     except Exception as exc:

@@ -51,13 +51,24 @@ Public Class BomExtractor
 
         Dim oBomView As BOMView = oBom.BOMViews("Structured")
 
-        Return BuildTree(oBomView.BOMRows, level:=0, parentMultiplier:=1)
+        ' Author of the TOP-LEVEL ASSEMBLY document — read once here, not
+        ' per-component below. A per-part Author would report whoever
+        ' authored that individual .ipt (which for a purchased/library
+        ' part is meaningless, and inconsistent row-to-row); the engineer
+        ' who owns THIS push is whoever authored the assembly itself.
+        ' Threaded down through every row so JL Check can pull JobBOSS's
+        ' Quoted_By from it without a human re-typing anything.
+        Dim assemblyAuthor As String = TryGetDocumentProperty(
+            oDoc, "Summary Information", "Author", fallback:="")
+
+        Return BuildTree(oBomView.BOMRows, level:=0, parentMultiplier:=1, author:=assemblyAuthor)
 
     End Function
 
     Private Function BuildTree(oRows As BOMRowsEnumerator,
                                level As Integer,
-                               parentMultiplier As Integer) As List(Of BomLineItem)
+                               parentMultiplier As Integer,
+                               author As String) As List(Of BomLineItem)
 
         Dim items As New List(Of BomLineItem)
 
@@ -104,14 +115,17 @@ Public Class BomExtractor
                 .Material = material,
                 .Category = category,
                 .CutLengthIn = cutLengthIn,
-                .Comments = comments
+                .Comments = comments,
+                .Author = author
             }
 
             ' Recurse, passing THIS row's effective quantity down as the
             ' multiplier — this is what makes child quantities roll up
-            ' correctly through multi-instance sub-assemblies.
+            ' correctly through multi-instance sub-assemblies. `author`
+            ' passes through unchanged at every level — it's the
+            ' top-level assembly's Author, not anything per-component.
             If oRow.ChildRows IsNot Nothing Then
-                newItem.Children = BuildTree(oRow.ChildRows, level + 1, effectiveQty)
+                newItem.Children = BuildTree(oRow.ChildRows, level + 1, effectiveQty, author)
             End If
 
             items.Add(newItem)
@@ -184,7 +198,8 @@ Public Class BomExtractor
             .Material = first.Material,
             .Category = first.Category,
             .CutLengthIn = first.CutLengthIn,
-            .Comments = first.Comments
+            .Comments = first.Comments,
+            .Author = first.Author
         }
 
         Dim notes As New List(Of String)
@@ -296,19 +311,35 @@ Public Class BomExtractor
     End Function
 
     ''' <summary>
-    ''' Reads an iProperty from an arbitrary named property set, returning
-    ''' the fallback if the set/property is missing or unreadable. Inventor
-    ''' spreads iProperties across several sets depending on which
-    ''' iProperties dialog tab they show on — e.g. "Comments" is on the
-    ''' Summary tab and lives in "Summary Information", not "Design
-    ''' Tracking Properties" where Part Number/Material/Description live.
+    ''' Reads an iProperty from an arbitrary named property set on a
+    ''' COMPONENT's document, returning the fallback if the set/property
+    ''' is missing or unreadable. Inventor spreads iProperties across
+    ''' several sets depending on which iProperties dialog tab they show
+    ''' on — e.g. "Comments" is on the Summary tab and lives in "Summary
+    ''' Information", not "Design Tracking Properties" where Part
+    ''' Number/Material/Description live. Thin wrapper over
+    ''' TryGetDocumentProperty for the common per-component case.
     ''' </summary>
     Private Function TryGetProperty(oCompDef As ComponentDefinition,
                                      propertySetName As String,
                                      propertyName As String,
                                      fallback As String) As String
+        Return TryGetDocumentProperty(oCompDef.Document, propertySetName, propertyName, fallback)
+    End Function
+
+    ''' <summary>
+    ''' Reads an iProperty from an arbitrary named property set directly
+    ''' off a Document — the same underlying read TryGetProperty does for
+    ''' a component, but usable when there's no ComponentDefinition in
+    ''' hand, e.g. reading the top-level assembly's own Author once in
+    ''' TraverseBom rather than any individual part's.
+    ''' </summary>
+    Private Function TryGetDocumentProperty(oDocument As Document,
+                                            propertySetName As String,
+                                            propertyName As String,
+                                            fallback As String) As String
         Try
-            Return oCompDef.Document.PropertySets.
+            Return oDocument.PropertySets.
                 Item(propertySetName).
                 Item(propertyName).Value.ToString()
         Catch

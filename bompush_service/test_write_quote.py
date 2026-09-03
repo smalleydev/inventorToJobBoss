@@ -81,12 +81,21 @@ def main():
     cursor = conn.cursor()
 
     try:
+        # Same optional-kwarg pattern as watcher_service.py: only pass
+        # quoted_by through when the export actually has one, so an
+        # older test file with no QuotedBy still falls back to
+        # write_quote()'s own default instead of passing None explicitly.
+        quoted_by_kwargs = {}
+        if payload.get("QuotedBy"):
+            quoted_by_kwargs["quoted_by"] = payload["QuotedBy"]
+
         quote_guid = write_quote(
             cursor,
             quote_number=quote_number,
             part_number=quote_number,
             description=f"Imported from {payload.get('SourceFile', '')}",
             lines=lines,
+            **quoted_by_kwargs,
         )
 
         print(f"\nWrote quote. GUID: {quote_guid}")
