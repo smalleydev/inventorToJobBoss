@@ -2,6 +2,14 @@
 bompush_service — watches the shared inbox for JL Check's approved
 exports and pushes each one into JobBOSS as a real quote.
 
+Detection is two-layered: a watchdog Observer reacts to filesystem
+events as they happen (the fast path), and a plain directory listing
+sweeps the inbox every POLL_INTERVAL_SECONDS regardless (the fallback
+path) — watchdog's notifications aren't reliable over a UNC/network
+share, so the poll is what catches anything the event path ever misses.
+Both paths funnel through the same claim-by-move-to-Processing step, so
+running both together is safe — whichever notices a file first wins.
+
 Pipeline per file:
   1. Claim it — move into inbox/processing/ (same-process debounce: a
      filesystem write can fire multiple watchdog events for one file).
@@ -64,6 +72,19 @@ LOGS_PATH = BOM_INTEGRATION_ROOT / "Logs"
 # file, so a still-in-progress write (JL Check's json.dump) has time to
 # finish and flush before we try to read it.
 DEBOUNCE_SECONDS = 1.0
+
+# How often the fallback poll sweeps the inbox, independent of watchdog
+# events entirely. watchdog's file-system notifications (ReadDirectory-
+# ChangesW on Windows) are not reliable over a UNC/network share like
+# BOM_INTEGRATION_ROOT — a share hiccup, a redirector cache, or a write
+# pattern the OS just doesn't surface a notification for can leave a
+# file sitting in the inbox with the watcher never told it arrived. This
+# poll is the safety net for that: it reuses the exact same startup-sweep
+# logic (process_existing_files) on a timer, so a missed event is caught
+# within one interval instead of sitting there until the service is
+# restarted. The event-driven path stays primary — this only ever picks
+# up what it missed.
+POLL_INTERVAL_SECONDS = 15
 
 log = logging.getLogger("bompush_service")
 log.setLevel(logging.INFO)
@@ -266,14 +287,33 @@ class InboxHandler(FileSystemEventHandler):
 
 
 def process_existing_files() -> None:
-    """Startup sweep: handles any .json files already sitting in the
-    inbox root when the service starts (watchdog only reports events
-    that happen after it starts watching)."""
+    """Sweeps the inbox root for any .json files sitting there right now
+    and processes each one — the same claim-by-move-to-Processing logic
+    InboxHandler uses for a live watchdog event, just triggered by
+    looking instead of being told.
+
+    Two callers:
+      - Once at startup (watchdog only reports events that happen after
+        it starts watching, so anything already in the inbox needs an
+        explicit first pass).
+      - Every POLL_INTERVAL_SECONDS thereafter, as a fallback safety net
+        for missed watchdog events on the network share (see
+        POLL_INTERVAL_SECONDS above). Silent when the inbox is empty
+        (the common case, every 15s) — no heartbeat log line, so a
+        healthy idle service doesn't spam Logs\\bompush_service.log;
+        the "Found N file(s)" line below is evidence enough that a
+        given sweep actually ran and did something.
+
+    Safe to call concurrently with (or overlapping) a watchdog event for
+    the same file: both paths claim a file the same way (an OS-level
+    move into Processing), so whichever gets there first wins and the
+    other's move simply fails and logs a warning — no double-processing.
+    """
     existing = sorted(INBOX_PATH.glob("*.json"))
     if not existing:
         return
 
-    log.info(f"Found {len(existing)} file(s) already in the inbox — processing now.")
+    log.info(f"Found {len(existing)} file(s) in the inbox — processing now.")
     for path in existing:
         claimed_path = PROCESSING_PATH / path.name
         try:
@@ -294,16 +334,36 @@ def process_existing_files() -> None:
 def main() -> None:
     _ensure_folders()
 
-    log.info(f"Watching {INBOX_PATH} for approved BOM exports...")
+    log.info(f"Watching {INBOX_PATH} for approved BOM exports "
+             f"(event-driven, plus a {POLL_INTERVAL_SECONDS}s poll fallback)...")
     process_existing_files()
 
     observer = Observer()
     observer.schedule(InboxHandler(), str(INBOX_PATH), recursive=False)
     observer.start()
 
+    # Sleep in 1s ticks rather than POLL_INTERVAL_SECONDS in one call, so
+    # Ctrl+C still stops the service within a second instead of waiting
+    # out however long is left on a long poll interval.
+    seconds_since_last_poll = 0
     try:
         while True:
             time.sleep(1)
+            seconds_since_last_poll += 1
+            if seconds_since_last_poll >= POLL_INTERVAL_SECONDS:
+                seconds_since_last_poll = 0
+                try:
+                    process_existing_files()
+                except Exception:
+                    # Same reasoning as InboxHandler._handle: one bad
+                    # poll sweep should never take the whole service
+                    # down. Every real per-file failure mode already
+                    # degrades to error/ + a log line inside
+                    # process_file; reaching here means something
+                    # outside that (e.g. the share itself unreachable
+                    # for this sweep) — log loudly and try again next
+                    # interval rather than crashing the service.
+                    log.exception("Poll sweep failed — will retry next interval.")
     except KeyboardInterrupt:
         log.info("Stopping...")
         observer.stop()

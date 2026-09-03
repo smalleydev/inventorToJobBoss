@@ -3,13 +3,16 @@ JobBOSS material matching logic.
 
 Two families of part number, handled differently:
 
-  JOB-SPECIFIC parts — three all-numeric segments, e.g. "28229-01-005"
-  (job number - sub-assembly - item). Unique to one job; they will NEVER
-  exist as their own JobBOSS material record. Looking them up by part
-  number (exact match or prefix search) is pointless and can produce
-  misleading "ambiguous" candidates from unrelated job-specific parts
-  that happen to share a job-number prefix. These resolve through the
-  Material field only.
+  JOB-SPECIFIC parts — exactly "xxxxx-xx-xxx": 5-digit job number,
+  2-digit sub-assembly, 3-digit item, e.g. "28229-01-005". Unique to one
+  job; they will NEVER exist as their own JobBOSS material record.
+  Looking them up by part number (exact match or prefix search) is
+  pointless and can produce misleading "ambiguous" candidates from
+  unrelated job-specific parts that happen to share a job-number prefix.
+  These resolve through the Material field only. A part number that's
+  merely three numeric segments but NOT this exact 5-2-3 shape (e.g.
+  "007-0302-0003") is a standard part, not job-specific — it goes
+  through the full match chain below like any other.
 
   STANDARD parts — letters in a suffix (e.g. "045-509-SS") or two-segment
   vendor-style numbers (e.g. "20-0259"). These go through the full
@@ -65,8 +68,12 @@ from db import get_connection
 
 # --- Pattern constants ------------------------------------------------------
 
-# Job-specific part number: exactly three all-numeric segments, no letters.
-JOB_SPECIFIC_PART_NUMBER = re.compile(r"^\d+-\d+-\d+$")
+# Job-specific part number: exactly "xxxxx-xx-xxx" — 5-digit job number,
+# 2-digit sub-assembly, 3-digit item. Deliberately NOT "any three numeric
+# segments" (e.g. "007-0302-0003" is a real standard part number that
+# happens to be three numeric segments too, just not this shape — it
+# must NOT be caught here or its exact-match step gets wrongly skipped).
+JOB_SPECIFIC_PART_NUMBER = re.compile(r"^\d{5}-\d{2}-\d{3}$")
 
 # Embedded "JB#<number>" cross-reference in a description, e.g.
 # "(JB# 028-381)" or "(JB #028-381)" — the space between "JB" and "#"
@@ -368,6 +375,7 @@ if __name__ == "__main__":
         ("028-0854-0046-SS01", "SS BR RD .75 T304 28-0153",
          "STAND-OFF, .75 X .375 X 1/4-20 (JB #028-381)"),                   # jb_reference, "JB #" spelling
         ("28229-01-105", "SS AN 3 X 3 X .25 T304 28-0063", ""),              # job-specific angle raw_stock
+        ("007-0302-0003", "HDPE, WHITE", ""),                                # NOT job-specific (wrong segment shape) -> exact_part if stocked
     ]
 
     conn = get_connection()
