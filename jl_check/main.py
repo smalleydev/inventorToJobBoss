@@ -441,30 +441,73 @@ class MainWindow(QMainWindow):
             self.load_file(path)
 
     def load_file(self, path: str) -> None:
-        """Load a BOM JSON — either resuming a previously saved session
-        for this same source file, or a fresh load that immediately
-        walks it against JobBOSS.
+        """Load a BOM JSON. If a saved session exists for this same
+        source filename, asks the engineer right here, at open time,
+        which way to go — same moment the old "Resume previous
+        session?" prompt used to appear, just with a smarter second
+        option than plain resume-verbatim-or-discard:
+
+          Continue Session — merge the freshly re-exported JSON against
+            the saved session: any part whose Description or Material
+            changed in Inventor since last time is re-walked against
+            JobBOSS from scratch; every part that didn't change keeps
+            EXACTLY the state (TravelerState, JobBossMaterial,
+            CutLengthIn, any manual resolution) it had when this BOM
+            was last closed. See _resume_with_merge.
+
+          Start Fresh Session — ignore the saved session entirely and
+            walk every row against JobBOSS from scratch, discarding all
+            prior resolutions/lengths/states, same as opening this BOM
+            for the very first time. The saved session file itself is
+            then overwritten with the fresh result (start_walk's own
+            checkpoint save).
+
+        No saved session exists -> no prompt, straight to a fresh walk,
+        same as always.
 
         Shared by File > Import and the startup auto-load (Inventor
-        add-in launch). Fully replaces both tables — any unsaved
-        resolutions from a DIFFERENT previously loaded file are
-        discarded (this file's own saved session, if any, is offered
-        for resume instead of being discarded).
-
-        Each row gets a stable _orig_index before display so the two
-        panels can always be reordered to line up with each other,
-        regardless of sorting or substitutions made later.
+        add-in launch). Fully replaces both tables. Each row gets a
+        stable _orig_index before display so the two panels can always
+        be reordered to line up with each other, regardless of sorting
+        or substitutions made later.
         """
+        previous_file_path = self._loaded_file_path
         self._loaded_file_path = path
-
-        if self._try_resume_session(path):
-            return  # resumed — skip the fresh walk below entirely
 
         with open(path, "r", encoding="utf-8") as f:
             rows = json.load(f)
 
         for i, row in enumerate(rows):
             row["_orig_index"] = i
+
+        session = self._load_saved_session(path)
+        if session is not None:
+            box = QMessageBox(self)
+            box.setWindowTitle("Previous session found")
+            box.setText(
+                f"A previous JL Check session was saved for "
+                f"'{Path(path).name}' (last saved {session.get('SavedAt', 'unknown time')}).\n\n"
+                f"Continue it — recompute only the parts that changed in "
+                f"Inventor since then, keep everything else exactly as you "
+                f"left it — or start over from scratch?"
+            )
+            continue_btn = box.addButton("Continue Session", QMessageBox.AcceptRole)
+            fresh_btn = box.addButton("Start Fresh Session", QMessageBox.DestructiveRole)
+            box.addButton(QMessageBox.Cancel)
+            box.setDefaultButton(continue_btn)
+            box.exec()
+
+            clicked = box.clickedButton()
+            if clicked == continue_btn:
+                self._resume_with_merge(rows, session)
+                return
+            elif clicked == fresh_btn:
+                pass  # fall through to the fresh walk below
+            else:
+                # Cancel — leave whatever was previously loaded alone,
+                # including which file future saves/checkpoints target.
+                self._loaded_file_path = previous_file_path
+                return
 
         self.base_model.replace_rows(rows)
         self.working_model.replace_rows([])
@@ -503,42 +546,176 @@ class MainWindow(QMainWindow):
         with open(session_path, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
 
-    def _try_resume_session(self, path: str) -> bool:
-        """Checks for a saved session matching `path`'s source filename
-        and, if found, asks whether to resume it. Returns True if a
-        session was loaded (caller should skip the normal fresh walk),
-        False otherwise (no session existed, or the user chose to
-        start fresh instead)."""
+    def _load_saved_session(self, path: str) -> dict | None:
+        """Read a previously saved session for `path`'s source filename,
+        if one exists. Returns the raw session dict (BaseRows/
+        WorkingRows/SavedAt) or None if no session was ever saved for
+        this file — the caller then does a normal fresh walk. No
+        prompt: merging (_resume_with_merge) is always the right thing
+        to do when a session exists, so there's no longer a decision to
+        ask the user for. To force a full re-walk from scratch anyway,
+        delete the .session.json file under SESSIONS_PATH by hand."""
         stem = Path(path).stem
         session_path = self.SESSIONS_PATH / f"{stem}.session.json"
 
         if not session_path.exists():
-            return False
+            return None
 
         with open(session_path, "r", encoding="utf-8") as f:
-            session = json.load(f)
+            return json.load(f)
 
-        saved_at = session.get("SavedAt", "an unknown time")
-        confirm = QMessageBox.question(
-            self, "Resume previous session?",
-            f"A previous session for this BOM was saved at {saved_at}.\n\n"
-            f"Resume it (keeping all prior resolutions), or start fresh "
-            f"(re-walk from scratch, discarding the saved progress)?",
-            QMessageBox.Yes | QMessageBox.No,
-        )
-        if confirm != QMessageBox.Yes:
-            return False
+    def _resume_with_merge(self, new_rows: list[dict], session: dict) -> None:
+        """Reconcile a freshly re-exported Inventor BOM against a
+        previously saved session for the same file.
 
-        # Rows saved and reloaded in exactly the order they were left —
-        # no re-sort here, so a manually reordered view comes back
-        # exactly as it was, not reset to the post-walk default.
-        self.base_model.replace_rows(session["BaseRows"])
-        self.working_model.replace_rows(session["WorkingRows"])
+        The whole point: an engineer can close JL Check mid-review, go
+        back into Inventor and correct a part's Description or
+        Material, re-run the add-in, and come back to find exactly that
+        part re-walked against JobBOSS — while every part that didn't
+        change keeps precisely the state it was left in (TravelerState,
+        JobBossMaterial, CutLengthIn, any manual resolution, all of it).
+
+        A part counts as "changed" when its Description or Material
+        differs from what the LAST saved BASE row had for that same
+        PartNumber (base rows are the untouched Inventor snapshot, so
+        this is a true diff against what Inventor actually said last
+        time — not against the working row, whose Description a custom
+        line may have deliberately overwritten). Quantity is refreshed
+        from the new export either way (it doesn't drive matching, so
+        there's no reason to recompute anything over it, but the
+        working table shouldn't show a stale count either). A part
+        missing from the new export is dropped; a part new to it is
+        walked fresh like any other row.
+
+        Matched by PartNumber — the identifier that survives a BOM
+        re-export even when Description/Material/row order change. A
+        PartNumber repeated more than once in one BOM is paired up in
+        the order both files list it, which is the best that can be
+        done without a better identity to key on; in practice an
+        Inventor BOM export has one row per distinct part number.
+        """
+        saved_base_by_part: dict[str, list[dict]] = {}
+        for row in session.get("BaseRows") or []:
+            saved_base_by_part.setdefault(row.get("PartNumber"), []).append(row)
+
+        saved_working_by_part: dict[str, list[dict]] = {}
+        for row in session.get("WorkingRows") or []:
+            saved_working_by_part.setdefault(row.get("PartNumber"), []).append(row)
+
+        merged_working: list[dict] = []
+        changed_count = 0
+        new_count = 0
+
+        for new_row in new_rows:
+            part_number = new_row.get("PartNumber")
+            old_base_queue = saved_base_by_part.get(part_number) or []
+            old_working_queue = saved_working_by_part.get(part_number) or []
+
+            old_base = old_base_queue.pop(0) if old_base_queue else None
+            old_working = old_working_queue.pop(0) if old_working_queue else None
+
+            unchanged = (
+                old_base is not None
+                and old_working is not None
+                and old_base.get("Description") == new_row.get("Description")
+                and old_base.get("Material") == new_row.get("Material")
+            )
+
+            if unchanged:
+                # Carry the old working row forward exactly as it was —
+                # resolution, TravelerState, CutLengthIn, everything —
+                # only re-keying _orig_index to the new BOM's position
+                # (so sorting and the base<->working mirror stay
+                # aligned) and refreshing Quantity (doesn't affect
+                # matching, but a stale count would be a visible bug).
+                carried = dict(old_working)
+                carried["_orig_index"] = new_row["_orig_index"]
+                carried["Quantity"] = new_row.get("Quantity", carried.get("Quantity"))
+                merged_working.append(carried)
+            else:
+                if old_base is None:
+                    new_count += 1
+                else:
+                    changed_count += 1
+                merged_working.append(self._resolve_row(new_row))
+
+        # Whatever's left in saved_base_by_part never got popped above —
+        # those PartNumbers are no longer in the new export at all.
+        removed_count = sum(len(rows) for rows in saved_base_by_part.values())
+
+        self.base_model.replace_rows(new_rows)
+        self.working_model.replace_rows(merged_working)
         self._lock_content_fit_columns(self.base_view, self.base_model)
         self._lock_content_fit_columns(self.working_view, self.working_model)
-        return True
+
+        # Same post-walk sort as a fresh load — a changed/new row can
+        # land anywhere in TravelerState (including back in Needs
+        # Attention), so it needs to resurface at the top like normal.
+        self._sort_column = "TravelerState"
+        self._sort_ascending = True
+        self._apply_sort("TravelerState")
+        self._show_sort_indicator("TravelerState", ascending=True)
+
+        self._save_session()
+
+        if changed_count or new_count or removed_count:
+            QMessageBox.information(
+                self, "BOM re-synced from Inventor",
+                f"Resumed the previous session for this BOM and compared it "
+                f"against what Inventor just re-exported.\n\n"
+                f"{changed_count} part(s) changed (Description or Material) "
+                f"and were re-walked against JobBOSS.\n"
+                f"{new_count} new part(s) were added and walked.\n"
+                f"{removed_count} part(s) are no longer in the BOM and were "
+                f"dropped.\n\n"
+                f"Everything else kept exactly the state it had when this "
+                f"BOM was last closed.",
+            )
 
     # --- The walk -----------------------------------------------------------
+
+    def _resolve_row(self, source: dict) -> dict:
+        """Resolve one Inventor BOM row against JobBOSS: run the lookup,
+        fill in any secondary category, and compute its TravelerState.
+        Returns a new dict — `source` itself is never mutated, matching
+        every other place a row gets resolved (start_walk's per-row
+        loop used to inline this; _resume_with_merge needs the exact
+        same logic for any row that's new or changed, hence factored
+        out here as the one place it's written)."""
+        result = lookup_material(
+            self.cursor,
+            part_number=source.get("PartNumber", ""),
+            material_field=source.get("Material", ""),
+            description=source.get("Description", ""),
+        )
+
+        resolved = dict(source)
+        resolved["MatchStatus"] = result.status
+
+        if result.status in AUTO_RESOLVE_STATUSES:
+            resolved["JobBossMaterial"] = result.matched_material
+            # Stocked_UofM off the matched Material row — traveler_state.py
+            # uses this to require a cut length whenever the material is
+            # stocked by a linear unit (feet/inches), regardless of Category.
+            resolved["JobBossUofM"] = result.matched_uofm
+        else:
+            resolved["JobBossMaterial"] = None
+            resolved["JobBossUofM"] = None
+            # Stash candidates for the resolve dialog's Candidates tab.
+            resolved["Candidates"] = [
+                (c.material_number, c.description, c.is_raw_stock)
+                for c in result.candidates
+            ]
+
+        # The Inventor extractor only categorizes TUBE/ROUND BAR/BAR;
+        # fill in SHEET/PLATE/ANGLE here from the material string.
+        if not resolved.get("Category"):
+            secondary = classify_secondary_category(resolved.get("Material", ""))
+            if secondary:
+                resolved["Category"] = secondary
+
+        resolved["TravelerState"] = compute_traveler_state(resolved)
+        return resolved
 
     def start_walk(self) -> None:
         """Walk the base table row by row, resolving each against JobBOSS.
@@ -564,40 +741,7 @@ class MainWindow(QMainWindow):
             QApplication.processEvents()
 
             source = self.base_model.get_row(row)
-
-            result = lookup_material(
-                self.cursor,
-                part_number=source.get("PartNumber", ""),
-                material_field=source.get("Material", ""),
-                description=source.get("Description", ""),
-            )
-
-            resolved = dict(source)  # copy — never mutate the base row
-            resolved["MatchStatus"] = result.status
-
-            if result.status in AUTO_RESOLVE_STATUSES:
-                resolved["JobBossMaterial"] = result.matched_material
-                # Stocked_UofM off the matched Material row — traveler_state.py
-                # uses this to require a cut length whenever the material is
-                # stocked by a linear unit (feet/inches), regardless of Category.
-                resolved["JobBossUofM"] = result.matched_uofm
-            else:
-                resolved["JobBossMaterial"] = None
-                resolved["JobBossUofM"] = None
-                # Stash candidates for the resolve dialog's Candidates tab.
-                resolved["Candidates"] = [
-                    (c.material_number, c.description, c.is_raw_stock)
-                    for c in result.candidates
-                ]
-
-            # The Inventor extractor only categorizes TUBE/ROUND BAR/BAR;
-            # fill in SHEET/PLATE/ANGLE here from the material string.
-            if not resolved.get("Category"):
-                secondary = classify_secondary_category(resolved.get("Material", ""))
-                if secondary:
-                    resolved["Category"] = secondary
-
-            resolved["TravelerState"] = compute_traveler_state(resolved)
+            resolved = self._resolve_row(source)
             self.working_model.append_row(resolved)
 
         self.base_model.set_walk_progress(-1)

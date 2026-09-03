@@ -73,6 +73,12 @@ Public Class BomExtractor
             Dim material As String = TryGetDesignProperty(oCompDef, "Material", fallback:="")
             Dim description As String = TryGetDesignProperty(oCompDef, "Description", fallback:="(no description)")
 
+            ' Comments lives in the Summary Information property set (the
+            ' iProperties dialog's Summary tab) — a different property set
+            ' than Part Number/Material/Description above, which are all
+            ' Design Tracking Properties. See TryGetProperty.
+            Dim comments As String = TryGetProperty(oCompDef, "Summary Information", "Comments", fallback:="")
+
             ' NOTE: partNumber fallback must stay "" (not a placeholder
             ' string) — Dedup detects missing part numbers via
             ' String.IsNullOrWhiteSpace and routes them to the
@@ -97,7 +103,8 @@ Public Class BomExtractor
                 .Level = level,
                 .Material = material,
                 .Category = category,
-                .CutLengthIn = cutLengthIn
+                .CutLengthIn = cutLengthIn,
+                .Comments = comments
             }
 
             ' Recurse, passing THIS row's effective quantity down as the
@@ -176,7 +183,8 @@ Public Class BomExtractor
             .Quantity = occurrences.Sum(Function(i) i.Quantity),
             .Material = first.Material,
             .Category = first.Category,
-            .CutLengthIn = first.CutLengthIn
+            .CutLengthIn = first.CutLengthIn,
+            .Comments = first.Comments
         }
 
         Dim notes As New List(Of String)
@@ -273,16 +281,35 @@ Public Class BomExtractor
     '===========================================================================
 
     ''' <summary>
-    ''' Reads a Design Tracking Properties iProperty, returning the fallback
-    ''' if the property set/property is missing or unreadable (virtual
-    ''' components and some vendor parts throw on PropertySets access).
+    ''' Reads a Design Tracking Properties iProperty (Part Number, Material,
+    ''' Description, ...), returning the fallback if the property
+    ''' set/property is missing or unreadable (virtual components and some
+    ''' vendor parts throw on PropertySets access). Thin wrapper over
+    ''' TryGetProperty pinned to the one property set every other reader in
+    ''' this class needs — Comments lives in a different set, hence that
+    ''' more general helper below.
     ''' </summary>
     Private Function TryGetDesignProperty(oCompDef As ComponentDefinition,
                                           propertyName As String,
                                           fallback As String) As String
+        Return TryGetProperty(oCompDef, "Design Tracking Properties", propertyName, fallback)
+    End Function
+
+    ''' <summary>
+    ''' Reads an iProperty from an arbitrary named property set, returning
+    ''' the fallback if the set/property is missing or unreadable. Inventor
+    ''' spreads iProperties across several sets depending on which
+    ''' iProperties dialog tab they show on — e.g. "Comments" is on the
+    ''' Summary tab and lives in "Summary Information", not "Design
+    ''' Tracking Properties" where Part Number/Material/Description live.
+    ''' </summary>
+    Private Function TryGetProperty(oCompDef As ComponentDefinition,
+                                     propertySetName As String,
+                                     propertyName As String,
+                                     fallback As String) As String
         Try
             Return oCompDef.Document.PropertySets.
-                Item("Design Tracking Properties").
+                Item(propertySetName).
                 Item(propertyName).Value.ToString()
         Catch
             Return fallback

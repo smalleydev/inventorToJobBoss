@@ -387,12 +387,23 @@ class ResolveDialog(QDialog):
         """Opens CustomLineDialog prefilled from this row's own Inventor
         PartNumber/Description — the natural starting point when nothing
         else matched. Nested dialog: cancelling it returns here with
-        this ResolveDialog still open and nothing changed."""
+        this ResolveDialog still open and nothing changed.
+
+        Extended Description is prefilled from the row's raw Material
+        string, with the Inventor "Comments" iProperty (if the engineer
+        left one) appended right after it on its own line — the closest
+        thing to a real extended description available with no matched
+        JobBOSS record to pull one from, plus whatever note the engineer
+        already wrote on the part."""
+        material = self._row.get("Material", "")
+        comments = (self._row.get("Comments") or "").strip()
+        ext_description_prefill = f"{material}\n{comments}" if comments else material
+
         dialog = CustomLineDialog(
             parent=self,
             id_prefill=self._row.get("PartNumber", ""),
             description_prefill=self._row.get("Description", ""),
-            ext_description_prefill=self._row.get("Material", ""),
+            ext_description_prefill=ext_description_prefill,
         )
         if dialog.exec() != CustomLineDialog.Accepted:
             return

@@ -21,9 +21,11 @@ Match priority, per part:
   2. Exact match: Inventor Material field (vendor number, "VENDOR "
      prefix stripped) == Material.Material
   3. Embedded JB# reference: some descriptions carry a deliberate
-     human-placed cross-reference like "(JB# 028-381)". Fully trusted —
-     resolves clean, no flag. If the referenced number doesn't exist,
-     falls through rather than trusting a broken reference.
+     human-placed cross-reference like "(JB# 028-381)" or "(JB #028-381)"
+     — engineers write this both ways, so the space before "#" is
+     optional. Fully trusted — resolves clean, no flag. If the
+     referenced number doesn't exist, falls through rather than trusting
+     a broken reference.
   4. Raw stock extraction: the Material field is a raw-stock description
      ending in the actual JobBOSS material number, e.g.
      "SS SH 10GA X 48 X 120 T304 2B 28-0003" -> "28-0003". Applies to
@@ -66,9 +68,10 @@ from db import get_connection
 # Job-specific part number: exactly three all-numeric segments, no letters.
 JOB_SPECIFIC_PART_NUMBER = re.compile(r"^\d+-\d+-\d+$")
 
-# Embedded "JB# <number>" cross-reference in a description, e.g.
-# "(JB# 028-381)". Case-insensitive; tolerant of surrounding text.
-JB_REFERENCE = re.compile(r"JB#\s*([A-Za-z0-9\-]+)", re.IGNORECASE)
+# Embedded "JB#<number>" cross-reference in a description, e.g.
+# "(JB# 028-381)" or "(JB #028-381)" — the space between "JB" and "#"
+# is optional either way. Case-insensitive; tolerant of surrounding text.
+JB_REFERENCE = re.compile(r"JB\s*#\s*([A-Za-z0-9\-]+)", re.IGNORECASE)
 
 # Trailing "<2-3 digits>-<3-5 digits>" token anchored to the end of the
 # Material description, e.g. "28-0003" or "18-0025".
@@ -362,6 +365,8 @@ if __name__ == "__main__":
         ("028-301-01-30", "LEX SH .25 X 48 X 96 18-0030", ""),               # needs_review_lexan
         ("028-0854-0045-SS01", "SS BR RD .75 T304 28-0153",
          "STAND-OFF, .75 X .375 X 1/4-20 (JB# 028-381)"),                    # jb_reference
+        ("028-0854-0046-SS01", "SS BR RD .75 T304 28-0153",
+         "STAND-OFF, .75 X .375 X 1/4-20 (JB #028-381)"),                   # jb_reference, "JB #" spelling
         ("28229-01-105", "SS AN 3 X 3 X .25 T304 28-0063", ""),              # job-specific angle raw_stock
     ]
 

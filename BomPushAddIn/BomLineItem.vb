@@ -36,6 +36,16 @@ Public Class BomLineItem
     ''' "TUBE", "ROUND BAR", "BAR", or "" for everything else.</summary>
     Public Property Category As String
 
+    ''' <summary>Comments iProperty (Summary Information property set —
+    ''' the "Comments" field on the iProperties dialog's Summary tab, a
+    ''' different property set than Material/PartNumber/Description,
+    ''' which live in Design Tracking Properties). Free-text notes an
+    ''' engineer left on the part in Inventor; JL Check appends this
+    ''' onto the Extended Description when a row is added as a Custom
+    ''' Line, right after the Material string. Empty string, never
+    ''' Nothing, when the part has no comment.</summary>
+    Public Property Comments As String
+
     ''' <summary>Make/Buy flag. RESERVED — not yet populated.</summary>
     Public Property MakeBuy As String
 
