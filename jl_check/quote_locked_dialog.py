@@ -10,34 +10,42 @@ an engineer might be here on purpose:
   - Accidentally clicked Finalize again on the same, still-correct BOM
     (should NOT create a duplicate quote — just informational, Close).
   - The BOM genuinely needs to be rebuilt (a mistake was found, a
-    revision came in) and this quote needs to be replaced. For that,
-    "Unlock and Rebuild" DELETES the old JobBOSS quote (the Quote,
-    Quote_Qty, Quote_Req, and Quote_Req_Qty rows tied to that specific
-    GUID — not the RFQ row, which other quotes may share) before
-    resetting the lock, so the rebuild REPLACES the old quote instead
-    of leaving it sitting alongside a new one. This is a real delete of
-    JobBOSS data, so it requires an explicit, serious confirmation —
-    distinct from the lighter PENDING confirmation below.
+    revision came in) and this quote needs to be replaced.
+
+REBUILD FLOW (per Shane's Integration.usp_ResetQuoteForRerun design —
+IT owns the actual delete of JobBOSS quote data now, not JL Check):
+  1. Engineer deletes the existing quote themselves in the JobBOSS
+     client (Quote/Quote_Req/Quote_Qty/Quote_Req_Qty/Bill_Of_Quotes).
+     JL Check has no DELETE rights on any of those tables — engineers
+     only ever get EXECUTE on the reset proc, nothing broader.
+  2. "Unlock and Rebuild" here re-checks `Quote WHERE RFQ = ?` (the
+     exact guard write_quote() itself uses before every push) to
+     confirm the delete actually happened before doing anything else.
+     If a Quote row is still there, this refuses to proceed — the
+     rebuild can't safely continue until JobBOSS is actually clear.
+  3. Once confirmed clear, calls
+     EXEC Integration.usp_ResetQuoteForRerun @QuoteNumber, @QuoteGuid
+     which clears the stale Integration.BOM_Staging_Detail rows and
+     flips the staging header from IMPORTED to ERROR.
+  4. Normal watchdog flow reclaims ERROR -> PENDING and rebuilds.
 
 PENDING — likely a stale claim left behind by a crashed run. "Unlock"
 here just resets the staging lock (no JobBOSS data exists yet for a
-PENDING row, so there's nothing to delete).
+PENDING row, so there's nothing to delete or verify).
 
 Both paths end the same way: a second, distinct button
 ("Continue with Finalize") is the explicit decision to proceed with
-writing — deliberately never the same click as the reset/delete
-action itself. Either step can be abandoned via Close with no side
-effects beyond whatever was already confirmed and applied.
+writing — deliberately never the same click as the reset action
+itself. Either step can be abandoned via Close with no side effects
+beyond whatever was already confirmed and applied.
 
 Error handling: every DB step below runs inside a try/except that
 rolls back the connection and shows a QMessageBox.critical with the
-real exception text. Without this, a failure partway through (e.g. a
-DELETE against a table name that doesn't actually match the live
-JobBOSS schema) would throw inside a Qt slot and, in a --windowed
-PyInstaller build, disappear with no console to print to — the
-confirm box just closes and the dialog silently reverts to its
-pre-click state, which is exactly the "pressing Yes does nothing"
-symptom this was built to fix.
+real exception text. Without this, a failure partway through would
+throw inside a Qt slot and, in a --windowed PyInstaller build,
+disappear with no console to print to — the confirm box just closes
+and the dialog silently reverts to its pre-click state, which is
+exactly the "pressing Yes does nothing" symptom this was built to fix.
 """
 
 from PySide6.QtWidgets import (
@@ -45,25 +53,13 @@ from PySide6.QtWidgets import (
 )
 
 
-def _delete_jobboss_quote(cursor, quote_guid: str) -> None:
-    """Deletes one Quote record and everything hanging off it — the
-    same cleanup this project has run by hand via scratch scripts many
-    times over, now attached to the Unlock-and-Rebuild action itself.
-    Does NOT touch the RFQ row (other quotes may legitimately share it)
-    or the Integration staging tables (handled separately by the caller).
-
-    Deliberately does NOT commit — the caller controls the transaction
-    boundary so this delete and the staging-status update land in one
-    all-or-nothing commit instead of partially applying if the second
-    step fails."""
-    cursor.execute("DELETE FROM Quote_Req_Qty WHERE Quote = ?", quote_guid)
-    cursor.execute("DELETE FROM Quote_Req WHERE Quote = ?", quote_guid)
-    cursor.execute("DELETE FROM Quote_Qty WHERE Quote = ?", quote_guid)
-    cursor.execute(
-        "DELETE FROM Bill_Of_Quotes WHERE Parent_Quote = ? OR Component_Quote = ?",
-        quote_guid, quote_guid,
-    )
-    cursor.execute("DELETE FROM Quote WHERE Quote = ?", quote_guid)
+def _jobboss_quote_still_exists(cursor, quote_number: str) -> bool:
+    """Same guard write_quote() runs before every push — reused here so
+    the rebuild path and the normal push path agree on what "clear"
+    means. True means the engineer has NOT actually deleted the quote
+    in JobBOSS yet (or the delete didn't fully take)."""
+    cursor.execute("SELECT Quote FROM Quote WHERE RFQ = ?", quote_number)
+    return cursor.fetchone() is not None
 
 
 class QuoteLockedDialog(QDialog):
@@ -106,9 +102,10 @@ class QuoteLockedDialog(QDialog):
                 f"(GUID {self._status_row.QuoteGuid}, at "
                 f"{self._status_row.ProcessedAt}).\n\n"
                 f"If this BOM needs to be rebuilt (a mistake or revision), "
-                f"unlocking will DELETE the existing JobBOSS quote and let "
-                f"you push a fresh one. If you just clicked Finalize again "
-                f"by accident, close this instead — nothing has changed."
+                f"first delete the existing quote yourself in JobBOSS, then "
+                f"click below to reset the lock and push a fresh one. If "
+                f"you just clicked Finalize again by accident, close this "
+                f"instead — nothing has changed."
             )
             self.action_btn.setText("Unlock and Rebuild")
             self.action_btn.setVisible(True)
@@ -129,40 +126,44 @@ class QuoteLockedDialog(QDialog):
     def _on_rebuild_clicked(self) -> None:
         confirm = QMessageBox.warning(
             self, "Confirm rebuild",
-            f"This will PERMANENTLY DELETE the existing JobBOSS quote for "
-            f"'{self._quote_number}' (GUID {self._status_row.QuoteGuid}) — "
-            f"the quote itself and all its material lines.\n\n"
-            f"This cannot be undone. Only proceed if this quote genuinely "
-            f"needs to be rebuilt.\n\nDelete the old quote and continue?",
+            f"Before continuing, you must have ALREADY deleted the "
+            f"existing quote for '{self._quote_number}' (GUID "
+            f"{self._status_row.QuoteGuid}) yourself in the JobBOSS "
+            f"client. JL Check will verify this and refuse to continue "
+            f"if it's still there.\n\n"
+            f"Have you deleted it in JobBOSS and want to reset the lock "
+            f"now?",
             QMessageBox.Yes | QMessageBox.No,
         )
         if confirm != QMessageBox.Yes:
             return
 
-        try:
-            _delete_jobboss_quote(self._cursor, self._status_row.QuoteGuid)
+        if _jobboss_quote_still_exists(self._cursor, self._quote_number):
+            QMessageBox.warning(
+                self, "Quote still exists",
+                f"'{self._quote_number}' still has a Quote record in "
+                f"JobBOSS. Delete it in the JobBOSS client first, then "
+                f"try again — nothing has changed here.",
+            )
+            return
 
+        try:
             self._cursor.execute(
-                """
-                UPDATE Integration.BOM_Staging_Header
-                SET Status = 'ERROR',
-                    RejectReason = 'Unlocked and rebuilt from JL Check — old quote deleted'
-                WHERE QuoteNumber = ? AND Status = 'IMPORTED'
-                """,
-                self._quote_number,
+                "EXEC Integration.usp_ResetQuoteForRerun "
+                "@QuoteNumber = ?, @QuoteGuid = ?",
+                self._quote_number, self._status_row.QuoteGuid,
             )
             self._cursor.connection.commit()
         except Exception as exc:
             self._cursor.connection.rollback()
             QMessageBox.critical(
                 self, "Rebuild failed",
-                f"Nothing was changed — the delete was rolled back.\n\n"
-                f"Error:\n{exc}",
+                f"Nothing was changed — rolled back.\n\nError:\n{exc}",
             )
             return
 
         self._show_continue_state(
-            "Old quote deleted. Click below to push a fresh one."
+            "Lock reset. Click below to push a fresh quote."
         )
 
     def _on_unlock_pending_clicked(self) -> None:
@@ -203,7 +204,7 @@ class QuoteLockedDialog(QDialog):
     def _show_continue_state(self, message: str) -> None:
         # Replace whatever action button was showing with the single,
         # distinct "go ahead" step — never the same click as the
-        # reset/delete action itself.
+        # reset action itself.
         self.message_label.setText(message)
         self.action_btn.setText("Continue with Finalize")
         self.action_btn.clicked.disconnect()
