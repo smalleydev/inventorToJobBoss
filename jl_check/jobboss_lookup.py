@@ -32,12 +32,17 @@ Match priority, per part:
   4. Raw stock extraction: the Material field is a raw-stock description
      ending in the actual JobBOSS material number, e.g.
      "SS SH 10GA X 48 X 120 T304 2B 28-0003" -> "28-0003". Applies to
-     sheet (SH), plate (PL), tube (TU), and angle (AN) shape codes.
-     UHMW and Lexan (key word "LEX") are both excluded from
-     auto-resolution regardless of shape code and always routed to a
-     human (needs_review_uhmw / needs_review_lexan) — same treatment,
-     separate status so each keeps its own identity through the rest
-     of the pipeline.
+     sheet (SH), plate (PL), tube (TU), angle (AN), and round bar/rod
+     (BR) shape codes.
+     UHMW SHEET/PLATE and Lexan (key word "LEX") are excluded from
+     auto-resolution and always routed to a human (needs_review_uhmw /
+     needs_review_lexan) — same treatment, separate status so each keeps
+     its own identity through the rest of the pipeline. UHMW BAR/ROD
+     (shape code BR — e.g. "UHMW BR RD .75 ...") is the one exception:
+     it's ordinary stick stock like SS BR or TU, so it goes through the
+     same raw-stock/gate path as any other linear stock instead of
+     always stopping for review — only flat UHMW (sheet/plate) still
+     forces a human to confirm every time.
   5. Progressive prefix search: truncate the part number at each
      trailing hyphen segment (never below the first two segments) and
      search for anything starting with that base. Skipped for
@@ -121,7 +126,9 @@ class LookupResult:
       jb_reference      — embedded JB# cross-reference matched
       raw_stock_match   — trailing raw-stock number matched
       ambiguous          — prefix search found candidates; human must pick
-      needs_review_uhmw  — UHMW stock; human must confirm even if matched
+      needs_review_uhmw  — UHMW sheet/plate stock; human must confirm
+                            even if matched (UHMW BAR/ROD does NOT get
+                            this status — see LINEAR_STOCK_SHAPE_CODES)
       needs_review_lexan — Lexan stock; same treatment as UHMW
       not_found          — nothing matched anywhere
 
@@ -260,8 +267,16 @@ def lookup_material(cursor, part_number: str, material_field: str,
     is_sheet_or_plate = False
 
     if material_field:
-        is_uhmw = "UHMW" in material_field.upper()
-        is_lexan = "LEX" in material_field.upper()
+        material_upper = material_field.upper()
+        is_bar_or_rod = _has_shape_code(material_field, "BR")
+
+        # UHMW never auto-resolves EXCEPT bar/rod (BR) stock — that's
+        # ordinary stick material like SS BR or TU/AN, not the flat
+        # sheet/plate stock this review gate exists for. "UHMW BR RD .75
+        # ..." falls straight through to the same raw-stock/gate path as
+        # any other linear stock below instead of forcing a review.
+        is_uhmw = "UHMW" in material_upper and not is_bar_or_rod
+        is_lexan = "LEX" in material_upper
         is_sheet_or_plate = any(
             _has_shape_code(material_field, code) for code in SHEET_PLATE_SHAPE_CODES
         )
@@ -275,8 +290,9 @@ def lookup_material(cursor, part_number: str, material_field: str,
             trailing_number = number_match.group(1)
 
             if is_uhmw:
-                # UHMW never auto-resolves — return immediately so a human
-                # confirms, with the candidate attached if it exists.
+                # UHMW sheet/plate never auto-resolves — return
+                # immediately so a human confirms, with the candidate
+                # attached if it exists.
                 row = _fetch_material(cursor, trailing_number)
                 return LookupResult(
                     status="needs_review_uhmw",
@@ -286,7 +302,7 @@ def lookup_material(cursor, part_number: str, material_field: str,
                 )
 
             if is_lexan:
-                # Lexan gets the exact same treatment as UHMW above —
+                # Lexan gets the exact same treatment as flat UHMW above —
                 # never auto-resolves, even though its shape code (SH)
                 # would otherwise read as ordinary sheet raw stock.
                 row = _fetch_material(cursor, trailing_number)
@@ -368,8 +384,9 @@ if __name__ == "__main__":
         ("NA", "VENDOR 11-0087", ""),                                        # exact_vendor
         ("20-0259", "VENDOR 20-0259", ""),                                   # exact_part
         ("28229-01-005", "SS SH 10GA X 60 X 120 T304 2B 28-0420", ""),       # job-specific raw_stock
-        ("028-300-01-30", "UHMW SH 1 X 48 X 120 18-0025", ""),               # needs_review_uhmw
+        ("028-300-01-30", "UHMW SH 1 X 48 X 120 18-0025", ""),               # needs_review_uhmw (flat)
         ("028-301-01-30", "LEX SH .25 X 48 X 96 18-0030", ""),               # needs_review_lexan
+        ("028-302-01-30", "UHMW BR RD .75 18-0040", ""),                     # UHMW bar/rod -> raw_stock_match/ambiguous, NOT needs_review_uhmw
         ("028-0854-0045-SS01", "SS BR RD .75 T304 28-0153",
          "STAND-OFF, .75 X .375 X 1/4-20 (JB# 028-381)"),                    # jb_reference
         ("028-0854-0046-SS01", "SS BR RD .75 T304 28-0153",
