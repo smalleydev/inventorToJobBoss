@@ -28,6 +28,16 @@ Both paths end the same way: a second, distinct button
 writing — deliberately never the same click as the reset/delete
 action itself. Either step can be abandoned via Close with no side
 effects beyond whatever was already confirmed and applied.
+
+Error handling: every DB step below runs inside a try/except that
+rolls back the connection and shows a QMessageBox.critical with the
+real exception text. Without this, a failure partway through (e.g. a
+DELETE against a table name that doesn't actually match the live
+JobBOSS schema) would throw inside a Qt slot and, in a --windowed
+PyInstaller build, disappear with no console to print to — the
+confirm box just closes and the dialog silently reverts to its
+pre-click state, which is exactly the "pressing Yes does nothing"
+symptom this was built to fix.
 """
 
 from PySide6.QtWidgets import (
@@ -40,7 +50,12 @@ def _delete_jobboss_quote(cursor, quote_guid: str) -> None:
     same cleanup this project has run by hand via scratch scripts many
     times over, now attached to the Unlock-and-Rebuild action itself.
     Does NOT touch the RFQ row (other quotes may legitimately share it)
-    or the Integration staging tables (handled separately by the caller)."""
+    or the Integration staging tables (handled separately by the caller).
+
+    Deliberately does NOT commit — the caller controls the transaction
+    boundary so this delete and the staging-status update land in one
+    all-or-nothing commit instead of partially applying if the second
+    step fails."""
     cursor.execute("DELETE FROM Quote_Req_Qty WHERE Quote = ?", quote_guid)
     cursor.execute("DELETE FROM Quote_Req WHERE Quote = ?", quote_guid)
     cursor.execute("DELETE FROM Quote_Qty WHERE Quote = ?", quote_guid)
@@ -49,7 +64,6 @@ def _delete_jobboss_quote(cursor, quote_guid: str) -> None:
         quote_guid, quote_guid,
     )
     cursor.execute("DELETE FROM Quote WHERE Quote = ?", quote_guid)
-    cursor.connection.commit()
 
 
 class QuoteLockedDialog(QDialog):
@@ -125,18 +139,27 @@ class QuoteLockedDialog(QDialog):
         if confirm != QMessageBox.Yes:
             return
 
-        _delete_jobboss_quote(self._cursor, self._status_row.QuoteGuid)
+        try:
+            _delete_jobboss_quote(self._cursor, self._status_row.QuoteGuid)
 
-        self._cursor.execute(
-            """
-            UPDATE Integration.BOM_Staging_Header
-            SET Status = 'ERROR',
-                RejectReason = 'Unlocked and rebuilt from JL Check — old quote deleted'
-            WHERE QuoteNumber = ? AND Status = 'IMPORTED'
-            """,
-            self._quote_number,
-        )
-        self._cursor.connection.commit()
+            self._cursor.execute(
+                """
+                UPDATE Integration.BOM_Staging_Header
+                SET Status = 'ERROR',
+                    RejectReason = 'Unlocked and rebuilt from JL Check — old quote deleted'
+                WHERE QuoteNumber = ? AND Status = 'IMPORTED'
+                """,
+                self._quote_number,
+            )
+            self._cursor.connection.commit()
+        except Exception as exc:
+            self._cursor.connection.rollback()
+            QMessageBox.critical(
+                self, "Rebuild failed",
+                f"Nothing was changed — the delete was rolled back.\n\n"
+                f"Error:\n{exc}",
+            )
+            return
 
         self._show_continue_state(
             "Old quote deleted. Click below to push a fresh one."
@@ -154,16 +177,24 @@ class QuoteLockedDialog(QDialog):
         if confirm != QMessageBox.Yes:
             return
 
-        self._cursor.execute(
-            """
-            UPDATE Integration.BOM_Staging_Header
-            SET Status = 'ERROR',
-                RejectReason = 'Manually unlocked from JL Check'
-            WHERE QuoteNumber = ? AND Status = 'PENDING'
-            """,
-            self._quote_number,
-        )
-        self._cursor.connection.commit()
+        try:
+            self._cursor.execute(
+                """
+                UPDATE Integration.BOM_Staging_Header
+                SET Status = 'ERROR',
+                    RejectReason = 'Manually unlocked from JL Check'
+                WHERE QuoteNumber = ? AND Status = 'PENDING'
+                """,
+                self._quote_number,
+            )
+            self._cursor.connection.commit()
+        except Exception as exc:
+            self._cursor.connection.rollback()
+            QMessageBox.critical(
+                self, "Unlock failed",
+                f"Nothing was changed — rolled back.\n\nError:\n{exc}",
+            )
+            return
 
         self._show_continue_state(
             "Unlocked. Click below to proceed with finalizing this BOM."
