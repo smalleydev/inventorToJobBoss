@@ -19,7 +19,7 @@ Two instances exist with different construction flags:
 import math
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
-from PySide6.QtGui import QColor, QDoubleValidator, QFont
+from PySide6.QtGui import QColor, QDoubleValidator, QFont, QIntValidator
 from PySide6.QtWidgets import QLineEdit, QStyledItemDelegate
 from traveler_state import compute_traveler_state
 
@@ -67,6 +67,43 @@ class LengthEditDelegate(QStyledItemDelegate):
     def setEditorData(self, editor, index):
         value = index.model().data(index, Qt.EditRole)
         editor.setText("" if value in (None, "", 0, 0.0) else str(value))
+        editor.selectAll()
+
+    def setModelData(self, editor, model, index):
+        text = editor.text().strip()
+        if text:
+            model.setData(index, text, Qt.EditRole)
+
+
+class QuantityEditDelegate(QStyledItemDelegate):
+    """Free-typing integer entry for the Quantity column.
+
+    Same rationale as LengthEditDelegate: Qt's default delegate for an
+    int-valued cell is a QSpinBox, which works fine here, but keeping
+    this as an explicit QLineEdit + QIntValidator delegate (rather than
+    relying on the default) keeps the editing behavior consistent with
+    CutLengthIn and makes the 1-minimum enforced by the validator itself
+    (a spinbox's built-in bounds silently clamp instead of rejecting,
+    which is fine too, but this is the same pattern already used here).
+
+    This exists because engineers occasionally need to override the
+    quantity Inventor's BOM extraction reported for a part — e.g. a
+    stale/orphaned row in Inventor's own Structured BOM overcounting an
+    occurrence that no longer exists in the model (a real Inventor BOM
+    caching issue, not something JL Check can detect on its own) — so
+    the working table needs to let that count be corrected by hand
+    rather than blocking on an Inventor-side fix every time.
+    """
+
+    def createEditor(self, parent, option, index):
+        editor = QLineEdit(parent)
+        validator = QIntValidator(1, 999999, editor)
+        editor.setValidator(validator)
+        return editor
+
+    def setEditorData(self, editor, index):
+        value = index.model().data(index, Qt.EditRole)
+        editor.setText("" if value in (None, "", 0) else str(value))
         editor.selectAll()
 
     def setModelData(self, editor, model, index):
@@ -177,6 +214,8 @@ class BomTableModel(QAbstractTableModel):
             return row_data.get(key, "")
 
         if role == Qt.ToolTipRole:
+            if key == "Quantity" and row_data.get("QuantityOverridden"):
+                return f"Manually overridden (Inventor reported {row_data.get('OriginalQuantity')})"
             return str(row_data.get(key, ""))
 
         if role == Qt.FontRole and index.row() % 2 == 1:
@@ -240,6 +279,27 @@ class BomTableModel(QAbstractTableModel):
             except (TypeError, ValueError):
                 return False
             value = round_up_to_sixteenth(value)
+
+        # Quantity edits must be a positive integer. This is an override
+        # of whatever Inventor's BOM extraction reported — most often
+        # needed when Inventor's own Structured BOM is stale/wrong (a
+        # deleted or suppressed occurrence still counted), which is not
+        # something a re-export or a JL Check re-walk can fix on its
+        # own. The original extracted value is kept on first edit
+        # (OriginalQuantity) so the override is visible/reversible, and
+        # QuantityOverridden marks the row so a later session resume
+        # (_resume_with_merge in main.py) doesn't silently clobber the
+        # override with whatever Inventor exports next time.
+        if key == "Quantity":
+            try:
+                value = int(value)
+            except (TypeError, ValueError):
+                return False
+            if value < 1:
+                return False
+            if not row_data.get("QuantityOverridden"):
+                row_data["OriginalQuantity"] = row_data.get("Quantity")
+            row_data["QuantityOverridden"] = True
 
         row_data[key] = value
 

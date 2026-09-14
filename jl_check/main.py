@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from bom_model import BomTableModel, LengthEditDelegate
+from bom_model import BomTableModel, LengthEditDelegate, QuantityEditDelegate
 from db import get_connection
 from jobboss_lookup import classify_secondary_category, lookup_material
 from resolve_dialog import ResolveDialog
@@ -350,6 +350,18 @@ class MainWindow(QMainWindow):
             self._length_delegate,
         )
 
+        # Free-typing integer entry for the Quantity column — lets an
+        # engineer override whatever count Inventor's BOM extraction
+        # reported (see QuantityEditDelegate for why this exists: a
+        # stale/orphaned Inventor Structured BOM row can overcount a
+        # part, and that's an Inventor-side data problem JL Check can't
+        # fix on its own).
+        self._quantity_delegate = QuantityEditDelegate(self.working_view)
+        self.working_view.setItemDelegateForColumn(
+            self.working_model.view_column_for_key("Quantity"),
+            self._quantity_delegate,
+        )
+
         splitter.setSizes([1, 1])
 
         self.working_view.doubleClicked.connect(self.on_working_row_double_clicked)
@@ -587,11 +599,14 @@ class MainWindow(QMainWindow):
         this is a true diff against what Inventor actually said last
         time — not against the working row, whose Description a custom
         line may have deliberately overwritten). Quantity is refreshed
-        from the new export either way (it doesn't drive matching, so
-        there's no reason to recompute anything over it, but the
-        working table shouldn't show a stale count either). A part
-        missing from the new export is dropped; a part new to it is
-        walked fresh like any other row.
+        from the new export for an unchanged part UNLESS it was
+        manually overridden (QuantityOverridden) — an engineer's
+        quantity correction (most often working around a stale/wrong
+        count in Inventor's own BOM, not something a re-export fixes)
+        has to survive a session resume, or the whole point of being
+        able to override it is defeated the next time the BOM is
+        re-exported. A part missing from the new export is dropped; a
+        part new to it is walked fresh like any other row.
 
         Matched by PartNumber — the identifier that survives a BOM
         re-export even when Description/Material/row order change. A
@@ -632,11 +647,17 @@ class MainWindow(QMainWindow):
                 # resolution, TravelerState, CutLengthIn, everything —
                 # only re-keying _orig_index to the new BOM's position
                 # (so sorting and the base<->working mirror stay
-                # aligned) and refreshing Quantity (doesn't affect
-                # matching, but a stale count would be a visible bug).
+                # aligned) and refreshing Quantity from the new export
+                # (doesn't affect matching, but a stale count would be
+                # a visible bug) — UNLESS this row's Quantity was
+                # manually overridden, in which case the override wins
+                # and the fresh Inventor count is discarded; otherwise
+                # every override would get silently wiped out on the
+                # very next re-export/resume.
                 carried = dict(old_working)
                 carried["_orig_index"] = new_row["_orig_index"]
-                carried["Quantity"] = new_row.get("Quantity", carried.get("Quantity"))
+                if not carried.get("QuantityOverridden"):
+                    carried["Quantity"] = new_row.get("Quantity", carried.get("Quantity"))
                 merged_working.append(carried)
             else:
                 if old_base is None:
