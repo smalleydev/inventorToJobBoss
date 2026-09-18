@@ -39,10 +39,8 @@ class NestingResult:
     total_piece_count: int
     stick_length_in: float
     total_stock_length_in: float  # sticks_needed * stick_length_in — what to ORDER
-    total_material_used_in: float  # sum of (piece + kerf) — what's actually CONSUMED,
-                                    # excluding the unused remainder of the last,
-                                    # partially-filled stick. Purchasing rounds up
-                                    # to whole sticks; this number doesn't.
+    total_material_used_in: float  # what's actually REQUIRED given how nesting
+                                    # actually packed the pieces — see nest_pieces.
 
 
 def nest_pieces(piece_lengths_in: list[float], stick_length_in: float,
@@ -66,14 +64,6 @@ def nest_pieces(piece_lengths_in: list[float], stick_length_in: float,
     # they fit into.
     pieces = sorted((p + kerf_in for p in piece_lengths_in), reverse=True)
 
-    # True material consumed: every piece plus its kerf, regardless of
-    # how packing groups them into sticks. This is the number that
-    # matters for "do I already have enough scrap/partial stock on
-    # hand" — total_stock_length_in (below) is the separate, larger
-    # figure for "how much do I need to ORDER," rounded up to whole
-    # sticks.
-    total_material_used_in = sum(pieces)
-
     oversized = [p for p in pieces if p > stick_length_in + FLOAT_TOLERANCE_IN]
     if oversized:
         raise ValueError(
@@ -95,6 +85,37 @@ def nest_pieces(piece_lengths_in: list[float], stick_length_in: float,
             remaining_capacity.append(stick_length_in - piece)
 
     sticks_needed = len(remaining_capacity)
+
+    # Material actually required, given how nesting really packed these
+    # pieces — NOT a flat sum(piece + kerf) computed independently of
+    # the packing result (that number can't tell a perfectly-nested job
+    # apart from a badly-fragmented one, since it never looks at
+    # remaining_capacity at all).
+    #
+    # Every stick except the LAST one opened is treated as fully spent,
+    # leftover capacity included: FFD checks every already-open stick,
+    # in order, before ever opening a new one, so by the time a new
+    # stick gets opened, every earlier stick's remaining capacity has
+    # already proven too small for anything else left in this cut list
+    # — otherwise FFD would have placed it there instead. That leftover
+    # is real scrap, not usable stock, and has to be charged for.
+    #
+    # The LAST stick opened is different: whatever's left on it is only
+    # there because the cut list ran out, not because it rejected
+    # anything — that remainder is a genuine, still-usable length of
+    # stock (a drop for the next job), so only what was actually cut
+    # from that one stick gets charged.
+    #
+    # Concrete example: a 240" stick, one 235" piece and one 10" piece.
+    # 235+10 doesn't fit on one stick, so nesting opens two. Stick 1's
+    # ~4.875" leftover (240 - 235 - kerf) is unusable for the 10" piece
+    # and gets charged in full (240"). Stick 2 only has the 10" piece on
+    # it, so only its actual usage (10" + kerf) is charged, not the
+    # whole second stick. Total required ≈ 250.125", not the naive
+    # 245.25" you'd get from just summing the two piece+kerf lengths,
+    # and not the full 480" of two whole sticks either.
+    last_stick_used_in = stick_length_in - remaining_capacity[-1]
+    total_material_used_in = (sticks_needed - 1) * stick_length_in + last_stick_used_in
 
     return NestingResult(
         sticks_needed=sticks_needed,

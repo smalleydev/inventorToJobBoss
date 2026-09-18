@@ -146,6 +146,22 @@ def _combine_rows(rows: list[dict], cursor) -> list[dict]:
 
     `cursor` is a live DB cursor, needed to look up each nested
     material's stick length (Material.IS_Length).
+
+    The exported nested-combined row is the ONLY source push_service's
+    quote_writer.py trusts for a nested line's Part_Length — it writes
+    MaterialUsedIn straight through with no fallback of its own (see
+    quote_writer.QuoteLine / _line_quantity_and_part_length). So the
+    guarantee that MaterialUsedIn is always a real, kerf-accounted
+    number has to be enforced HERE, before a row ever leaves JL Check,
+    not downstream. result.total_material_used_in comes straight out of
+    nest_pieces() — every stick opened except the last one charged in
+    full (its leftover is unusable scrap once nesting moves past it),
+    plus the actual used length of the last stick (its leftover is a
+    genuine, still-usable remnant) — and is only ever 0.0 if `pieces`
+    ended up empty (every row for this material in this group had
+    Quantity <= 0, which expand_pieces silently drops). That's a real
+    data problem, not something to export silently as if nesting had
+    produced a legitimate zero-length answer.
     """
     nestable_rows = [r for r in rows if r.get("Category") in NESTED_CATEGORIES
                      and r.get("CutLengthIn") not in (None, 0, 0.0)]
@@ -206,6 +222,22 @@ def _combine_rows(rows: list[dict], cursor) -> list[dict]:
         stick_length = _get_stick_length(cursor, material_key, uofm)
         result = nest_pieces(pieces, stick_length_in=stick_length)
 
+        # Guarantee the number quote_writer.py will write as Part_Length
+        # (the kerf-accounted material actually consumed) is real before
+        # this row ever gets exported. Without this check, a material
+        # whose rows all had Quantity<=0 would silently nest to "0
+        # pieces / 0 sticks" and produce a combined line with
+        # MaterialUsedIn == 0.0 — which push_service no longer has any
+        # fallback for, so it would hard-fail there instead of here,
+        # after the engineer already thinks Finalize succeeded.
+        if result.total_material_used_in in (None, 0, 0.0):
+            raise ValueError(
+                f"Nesting for material '{material_key}' produced no "
+                f"material-consumed total (every row's Quantity is 0 or "
+                f"the cut list is empty) — cannot finalize this line. "
+                f"Check the Quantity column for '{material_key}' rows."
+            )
+
         part_numbers = [r.get("PartNumber", "") for r in group]
         first = group[0]
         cut_list_note = ", ".join(
@@ -228,12 +260,21 @@ def _combine_rows(rows: list[dict], cursor) -> list[dict]:
             "ConflictNotes": None,
             "SourcePartNumbers": ", ".join(part_numbers),
             "CutList": cut_list_note,
-            # Total stock length in inches, for quote_writer to convert
-            # into the material's stocked UofM (e.g. ft).
+            # Total stock length in inches (sticks_needed * stick length,
+            # rounded up to whole sticks) — kept for reference/CutList
+            # context only. push_service intentionally never writes this
+            # anywhere on the quote (stick count stays 0 there); it only
+            # ever reads MaterialUsedIn below for Part_Length.
             "TotalStockLengthIn": result.total_stock_length_in,
-            # True material consumed (sum of piece + kerf), for the
-            # Part_Length field — distinct from the rounded-up-to-
-            # whole-sticks order quantity above.
+            # True material required, accounting for how nesting actually
+            # packed these pieces — every stick fully charged except the
+            # last one opened, which only charges its actual used length
+            # (see nest_pieces' docstring for why). NOT a flat sum of
+            # piece+kerf (that ignores which pieces couldn't share a
+            # stick) and NOT rounded up to whole sticks either. This is
+            # the number that lands in JobBOSS as Quote_Req.Part_Length
+            # (see quote_writer.py), so it has to be right and present by
+            # the time it leaves here — see the guard above.
             "MaterialUsedIn": result.total_material_used_in,
         })
 
