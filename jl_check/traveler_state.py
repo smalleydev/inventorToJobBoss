@@ -152,7 +152,7 @@ IGNORED_PART_NUMBER_PREFIXES = ("10-",)
 # normal matching. Exact, uppercase, no "VENDOR " prefix — applies to
 # either PartNumber or vendor number.
 IGNORED_PREFIX_EXCEPTIONS = frozenset({
-    # "10-0500",
+    "10-2101","10-6210","10-2129","10-1655","10-5796"
 })
 
 # Categories that carry a real linear cut length.
