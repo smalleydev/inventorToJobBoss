@@ -50,8 +50,8 @@ Rule order in compute_traveler_state:
       Reference-only models; their line lives elsewhere (e.g. the
       electrical BOM). Checked before any match-status rule, so an
       exact JobBOSS match can't pull it back in.
-  1c. PartNumber starts with an IGNORED_PART_NUMBER_PREFIXES entry
-      ("10-") -> Ignored, outright.
+  1c. PartNumber or vendor number starts with an IGNORED_PART_NUMBER_PREFIXES
+      entry ("10-") -> Ignored, unless listed in IGNORED_PREFIX_EXCEPTIONS.
   2. Custom line -> Custom, unconditionally. Set once at creation and
      never recomputed off of it — a custom line has no MatchStatus in
      the matching sense, no Category, nothing else in this function
@@ -143,6 +143,18 @@ REFERENCE_MARKER = re.compile(r"\bREFERENCE\b", re.IGNORECASE)
 # not catch "100-..." or "1000-...".
 IGNORED_PART_NUMBER_PREFIXES = ("10-",)
 
+# Part-number families excluded from the export outright, checked against
+# both the Inventor PartNumber and the vendor number ("VENDOR 10-0341" ->
+# "10-0341"). Include the trailing hyphen so "10-" can't catch "100-...".
+IGNORED_PART_NUMBER_PREFIXES = ("10-",)
+
+# Specific numbers that match a prefix above but must still flow through
+# normal matching. Exact, uppercase, no "VENDOR " prefix — applies to
+# either PartNumber or vendor number.
+IGNORED_PREFIX_EXCEPTIONS = frozenset({
+    # "10-0500",
+})
+
 # Categories that carry a real linear cut length.
 LENGTH_REQUIRED_CATEGORIES = frozenset({"TUBE", "ANGLE", "BAR", "ROUND BAR"})
 
@@ -177,6 +189,20 @@ SORT_ORDER = {
 }
 
 
+def _in_ignored_family(row: dict) -> bool:
+    """True if PartNumber or vendor number starts with an ignored prefix
+    and isn't listed in IGNORED_PREFIX_EXCEPTIONS."""
+    part_number = (row.get("PartNumber") or "").strip().upper()
+    material = (row.get("Material") or "").strip().upper()
+    vendor_number = material[len("VENDOR "):].strip() if material.startswith("VENDOR ") else ""
+
+    return any(
+        ident.startswith(IGNORED_PART_NUMBER_PREFIXES)
+        and ident not in IGNORED_PREFIX_EXCEPTIONS
+        for ident in (part_number, vendor_number)
+        if ident
+    )
+
 def compute_traveler_state(row: dict) -> str:
     """Compute the Traveler State for a row dict carrying MatchStatus,
     Category, and CutLengthIn. Safe to call repeatedly — it derives the
@@ -191,13 +217,10 @@ def compute_traveler_state(row: dict) -> str:
     if status == "manually_ignored":
         return "Ignored"
 
-    # 1b. Reference-only model — excluded from export; its real line item
-    # lives elsewhere (e.g. the electrical BOM). Checked against both
-    # Material and Description, before the NA / special-review /
-    # match-status rules, so it never lands in Needs Attention and an
-    # exact JobBOSS match can't pull it back into the export.
-    if (REFERENCE_MARKER.search(row.get("Material") or "")
-            or REFERENCE_MARKER.search(row.get("Description") or "")):
+    # 1c. Ignored part-number family (PartNumber or vendor number) —
+    # excluded outright unless explicitly listed as an exception. Before
+    # rule 3 so "NA" + "VENDOR 10-xxxx" lands in Ignored, not Needs Attention.
+    if _in_ignored_family(row):
         return "Ignored"
 
     # 1c. Ignored part-number family — excluded outright, whatever the
