@@ -46,10 +46,10 @@ inline edit.
 
 Rule order in compute_traveler_state:
   1. Explicit engineer ignore always wins.
-  1b. Material carries "(REFERENCE. SEE ELECTRICAL BOM)" -> Ignored.
-      Electrical components modeled for fit only; their line lives on
-      the electrical BOM. Matched on the Material string, before any
-      match-status rule, so an exact JobBOSS match can't pull it back in.
+  1b. "REFERENCE" (whole word) in Material or Description -> Ignored.
+      Reference-only models; their line lives elsewhere (e.g. the
+      electrical BOM). Checked before any match-status rule, so an
+      exact JobBOSS match can't pull it back in.
   2. Custom line -> Custom, unconditionally. Set once at creation and
      never recomputed off of it — a custom line has no MatchStatus in
      the matching sense, no Category, nothing else in this function
@@ -128,14 +128,12 @@ UNRESOLVED_STATUSES = frozenset({
 # Categories excluded from the JobBOSS export entirely.
 EXCLUDED_CATEGORIES = frozenset({"SHEET", "PLATE"})
 
-# Electrical components modeled in Inventor for fit/reference only — the
-# real line item lives on the electrical BOM. Engineering marks these by
-# suffixing the Material name, e.g.
+# Parts modeled in Inventor for fit/reference only — their real line item
+# lives elsewhere (e.g. the electrical BOM). Engineering marks these by
+# putting the word REFERENCE in the Material or Description, e.g.
 #   "Saginaw SCE-20EL2008LP: 33-0013 (REFERENCE. SEE ELECTRICAL BOM)"
-# Tolerant of case, spacing, and a missing period.
-ELECTRICAL_REFERENCE_MARKER = re.compile(
-       r"\(?\s*REFERENCE\.?\s+SEE\s+ELECTRICAL\s+BOM\s*\)?", re.IGNORECASE
-)
+# Whole word, case-insensitive — won't fire on "PREFERENCE"/"REFERENCED".
+REFERENCE_MARKER = re.compile(r"\bREFERENCE\b", re.IGNORECASE)
 
 # Categories that carry a real linear cut length.
 LENGTH_REQUIRED_CATEGORIES = frozenset({"TUBE", "ANGLE", "BAR", "ROUND BAR"})
@@ -185,12 +183,13 @@ def compute_traveler_state(row: dict) -> str:
     if status == "manually_ignored":
         return "Ignored"
 
-    # 1b. Electrical reference model — excluded from export, owned by the
-    # electrical BOM. Checked before the NA / special-review / match-status
-    # rules so it never lands in Needs Attention, and regardless of
-    # whatever jobboss_lookup matched (33-xxxx may exact-match a real
-    # JobBOSS material — that's the electrical BOM's line, not ours).
-    if ELECTRICAL_REFERENCE_MARKER.search(row.get("Material") or ""):
+    # 1b. Reference-only model — excluded from export; its real line item
+    # lives elsewhere (e.g. the electrical BOM). Checked against both
+    # Material and Description, before the NA / special-review /
+    # match-status rules, so it never lands in Needs Attention and an
+    # exact JobBOSS match can't pull it back into the export.
+    if (REFERENCE_MARKER.search(row.get("Material") or "")
+            or REFERENCE_MARKER.search(row.get("Description") or "")):
         return "Ignored"
 
     # 2. Custom line item — added directly via "Add Custom Line," never
