@@ -50,6 +50,8 @@ Rule order in compute_traveler_state:
       Reference-only models; their line lives elsewhere (e.g. the
       electrical BOM). Checked before any match-status rule, so an
       exact JobBOSS match can't pull it back in.
+  1c. PartNumber starts with an IGNORED_PART_NUMBER_PREFIXES entry
+      ("10-") -> Ignored, outright.
   2. Custom line -> Custom, unconditionally. Set once at creation and
      never recomputed off of it — a custom line has no MatchStatus in
      the matching sense, no Category, nothing else in this function
@@ -135,6 +137,12 @@ EXCLUDED_CATEGORIES = frozenset({"SHEET", "PLATE"})
 # Whole word, case-insensitive — won't fire on "PREFERENCE"/"REFERENCED".
 REFERENCE_MARKER = re.compile(r"\bREFERENCE\b", re.IGNORECASE)
 
+# Inventor part-number prefixes that are always excluded from the export,
+# regardless of material, description, or JobBOSS match. Tuple so a future
+# prefix is a one-line addition. Include the trailing hyphen — "10-" must
+# not catch "100-..." or "1000-...".
+IGNORED_PART_NUMBER_PREFIXES = ("10-",)
+
 # Categories that carry a real linear cut length.
 LENGTH_REQUIRED_CATEGORIES = frozenset({"TUBE", "ANGLE", "BAR", "ROUND BAR"})
 
@@ -190,6 +198,11 @@ def compute_traveler_state(row: dict) -> str:
     # exact JobBOSS match can't pull it back into the export.
     if (REFERENCE_MARKER.search(row.get("Material") or "")
             or REFERENCE_MARKER.search(row.get("Description") or "")):
+        return "Ignored"
+
+    # 1c. Ignored part-number family — excluded outright, whatever the
+    # lookup found. Same placement rationale as 1b.
+    if (row.get("PartNumber") or "").strip().upper().startswith(IGNORED_PART_NUMBER_PREFIXES):
         return "Ignored"
 
     # 2. Custom line item — added directly via "Add Custom Line," never
