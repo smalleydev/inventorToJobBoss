@@ -93,7 +93,7 @@ TRAILING_MATERIAL_NUMBER = re.compile(r"(\d{2,3}-\d{3,5})\s*$")
 # material number (step 4). Sheet/plate get special no-gate treatment;
 # see FLAT_STOCK_SHAPE_CODES usage in lookup_material.
 SHEET_PLATE_SHAPE_CODES = ("SH", "PL")
-LINEAR_STOCK_SHAPE_CODES = ("TU", "AN", "BR")
+LINEAR_STOCK_SHAPE_CODES = ("TU", "AN", "BR", "PI")
 
 # Minimum number of hyphen segments the prefix search will keep. Going
 # below two (e.g. searching just "028") returns far too many unrelated
