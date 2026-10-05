@@ -173,7 +173,7 @@ RAW_STOCK_STATUSES = frozenset({"raw_stock_match", "resolved_manual_raw_stock"})
 # The other UofM values seen in this JobBOSS instance, "ea" and
 # "pack"/"PACK", are deliberately absent — neither implies a linear
 # length, so they fall through to the ordinary Clean/Attended rule 8.
-LENGTH_REQUIRED_UOFM = frozenset({"FT", "IN"})
+LENGTH_REQUIRED_UOFM = frozenset({"FT", "FEET", "IN", "INCH"})
 
 # Display/sort priority: lower number sorts first. Alphabetical order
 # would bury "Needs Attention" below "Attended" — this keeps the rows
