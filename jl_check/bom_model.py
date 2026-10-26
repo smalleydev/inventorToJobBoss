@@ -203,6 +203,15 @@ class BomTableModel(QAbstractTableModel):
                 "resolved_manual", "resolved_manual_raw_stock"
             ) and row_data.get("JobBossMaterial")
 
+            # Custom lines likewise show the engineer-typed ID in Part
+            # Number (row_data["Description"] already holds the typed
+            # description — the push service reads it from there).
+            if row_data.get("MatchStatus") == "custom_line" and row_data.get("JobBossMaterial"):
+                if key == "PartNumber":
+                    return row_data["JobBossMaterial"]
+                if key == "Material":
+                    return "---"
+
             if is_resolved_manual:
                 if key == "PartNumber":
                     return row_data["JobBossMaterial"]

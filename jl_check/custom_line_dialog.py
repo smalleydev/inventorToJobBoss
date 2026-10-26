@@ -35,12 +35,15 @@ class CustomLineDialog(QDialog):
     ext_description_prefill starts from the row's raw Material string
     (e.g. "SS SH 12GA X 48 X 120 T316L #4") — the closest existing
     equivalent to a real extended description, since there's no matched
-    JobBOSS record to pull one from. All three remain freely editable."""
+    JobBOSS record to pull one from. All three remain freely editable.
+
+    editing=True is for re-opening an existing custom line: the caller
+    prefills with the line's current values and only the title changes."""
 
     def __init__(self, parent=None, id_prefill: str = "", description_prefill: str = "",
-                 ext_description_prefill: str = ""):
+                 ext_description_prefill: str = "", editing: bool = False):
         super().__init__(parent)
-        self.setWindowTitle("Add Custom Line")
+        self.setWindowTitle("Edit Custom Line" if editing else "Add Custom Line")
         self.resize(480, 320)
 
         self._result: dict | None = None

@@ -13,7 +13,9 @@ Actions available:
     the final export, same as sheet/plate)
   - Add as Custom Line -> custom_line (last resort when nothing in the
     material library or raw stock is right; ID/Description prefilled
-    from this row's own Inventor PartNumber/Description, both editable)
+    from this row's own Inventor PartNumber/Description, both editable).
+    On a row that's already a custom line this becomes "Edit Custom
+    Line", prefilled with the line's current values instead
   - Cancel -> no change to the row
 
 Usage: construct, exec(), then read resolution() — a dict of row updates
@@ -167,8 +169,11 @@ class ResolveDialog(QDialog):
 
         # Last resort: nothing in the material library or raw stock is
         # right. Opens CustomLineDialog prefilled from this row's own
-        # Inventor data.
-        custom_line_btn = QPushButton("Add as Custom Line")
+        # Inventor data — or, if this row is already a custom line,
+        # becomes "Edit Custom Line" and prefills with its current values.
+        custom_line_btn = QPushButton(
+            "Edit Custom Line" if self._is_custom_line() else "Add as Custom Line"
+        )
         custom_line_btn.clicked.connect(self._add_as_custom_line)
         outer_layout.addWidget(custom_line_btn)
 
@@ -383,6 +388,9 @@ class ResolveDialog(QDialog):
         }
         self.accept()
 
+    def _is_custom_line(self) -> bool:
+        return self._row.get("MatchStatus") == "custom_line"
+
     def _add_as_custom_line(self) -> None:
         """Opens CustomLineDialog prefilled from this row's own Inventor
         PartNumber/Description — the natural starting point when nothing
@@ -394,17 +402,30 @@ class ResolveDialog(QDialog):
         left one) appended right after it on its own line — the closest
         thing to a real extended description available with no matched
         JobBOSS record to pull one from, plus whatever note the engineer
-        already wrote on the part."""
-        material = self._row.get("Material", "")
-        comments = (self._row.get("Comments") or "").strip()
-        ext_description_prefill = f"{material}\n{comments}" if comments else material
+        already wrote on the part.
 
-        dialog = CustomLineDialog(
-            parent=self,
-            id_prefill=self._row.get("PartNumber", ""),
-            description_prefill=self._row.get("Description", ""),
-            ext_description_prefill=ext_description_prefill,
-        )
+        If the row is already a custom line, this edits it instead: the
+        dialog prefills with the line's current ID (JobBossMaterial),
+        Description and ExtDescription rather than the Inventor data."""
+        if self._is_custom_line():
+            dialog = CustomLineDialog(
+                parent=self,
+                id_prefill=self._row.get("JobBossMaterial") or "",
+                description_prefill=self._row.get("Description") or "",
+                ext_description_prefill=self._row.get("ExtDescription") or "",
+                editing=True,
+            )
+        else:
+            material = self._row.get("Material", "")
+            comments = (self._row.get("Comments") or "").strip()
+            ext_description_prefill = f"{material}\n{comments}" if comments else material
+
+            dialog = CustomLineDialog(
+                parent=self,
+                id_prefill=self._row.get("PartNumber", ""),
+                description_prefill=self._row.get("Description", ""),
+                ext_description_prefill=ext_description_prefill,
+            )
         if dialog.exec() != CustomLineDialog.Accepted:
             return
         result = dialog.result()
