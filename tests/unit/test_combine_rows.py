@@ -136,3 +136,31 @@ def test_missing_key_sorts_with_blanks():
     rows = [{"Material": "B"}, {}, {"Material": "A"}]
     ordered = sorted(rows, key=lambda r: main._sort_value(r, "Material"))
     assert [r.get("Material") for r in ordered] == [None, "A", "B"]
+
+
+# --- Nesting failure reasons ------------------------------------------------
+
+def test_failure_types_are_distinct(cursor):
+    from stock_nesting import OversizedPieceError
+
+    with pytest.raises(main.MissingStickLengthError):
+        main._combine_rows([tube("T1", "28-0005", 1, 10)], cursor)
+    with pytest.raises(main.EmptyNestError):
+        main._combine_rows([tube("T1", "28-0003", 0, 10)], cursor)
+    with pytest.raises(OversizedPieceError):
+        main._combine_rows([tube("T1", "28-0003", 1, 300)], cursor)
+
+
+def test_failure_reason_names_the_actual_cause(cursor):
+    # Regression: every nesting failure used to say "missing setup data".
+    reasons = []
+    for rows in ([tube("T1", "28-0005", 1, 10)], [tube("T1", "28-0003", 0, 10)],
+                 [tube("T1", "28-0003", 1, 300)]):
+        with pytest.raises(ValueError) as info:
+            main._combine_rows(rows, cursor)
+        reasons.append(main._nesting_failure_reason(info.value))
+    assert reasons == [
+        "a material is missing setup data in JobBOSS",
+        "a nested material has no quantity to cut",
+        "a cut is longer than its material's stick length",
+    ]
