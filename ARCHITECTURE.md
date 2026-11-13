@@ -103,13 +103,16 @@ reports `Quantity = 8`, not `1`.
    silently to the first occurrence's length. Worth resolving before
    this ever bites a real nested cut list.
 
-**Category detection** (`DetectCategory`) only recognizes `TUBE`,
-`ROUND BAR`, and `BAR` from the `Material` string at extraction time.
-`SHEET`, `PLATE`, and `ANGLE` are deliberately *not* detected here —
-that classification happens later, in JL Check (`classify_secondary_
-category`), during the walk. Splitting it this way means the Inventor
-add-in doesn't need updating every time a new secondary category
-matters to the JobBOSS matching logic — only the Python side does.
+**Category detection** (`DetectCategory`) recognizes every *linear*
+stock shape from the `Material` string at extraction time: `TUBE`,
+`ROUND BAR`, `BAR`, `ANGLE` (`AN`) and `PIPE` (`PI`). It has to: the
+add-in only reads a part's length parameter when it has a category, so
+a linear shape missing here loses its model length, and a new-style
+part arrives looking like an old-style one. (`ANGLE` used to be left
+to JL Check, so angle lengths were never read.) `SHEET` and `PLATE`
+carry no length and are still classified only in JL Check
+(`classify_secondary_category`), which also fills in `ANGLE`/`PIPE`
+for exports made by older add-in builds.
 
 **Cut length** (`TryGetLengthInches`) tries a "length" **User Defined
 Property** first (already stored as a formatted inch string like
@@ -296,7 +299,7 @@ Two different combining strategies, depending on category:
 - **Simple combine** (hardware, vendor items, anything not in
   `NESTED_CATEGORIES`): grouped by `(JobBossMaterial, CutLengthIn)` —
   an *exact* match on both — quantities summed within each group.
-- **Nested combine** (`TUBE`/`ANGLE`/`BAR`/`ROUND BAR` with a real cut
+- **Nested combine** (`TUBE`/`ANGLE`/`BAR`/`ROUND BAR`/`PIPE` with a real cut
   length): grouped by material **only**, ignoring length, and run
   through `stock_nesting.nest_pieces` — a first-fit-decreasing bin-
   packing heuristic. Every individual piece across every length of
@@ -412,10 +415,9 @@ to get subtly wrong by inference alone:
   the business-key column is left `NULL` on insert. `_insert_and_get_
   generated_key` leans on this directly: insert with the key column
   NULL, capture the row via `SCOPE_IDENTITY()`, then re-query for the
-  trigger-populated business key. (`jobboss_keys.py`'s `next_key` was
-  an earlier attempt at replicating `p_GetNextKey` calls directly —
-  since superseded by this trigger-based approach and no longer called
-  anywhere; see `CODE_REVIEW.md`.)
+  trigger-populated business key. (An earlier `jobboss_keys.py`
+  replicated `p_GetNextKey` calls directly; it was superseded by this
+  trigger-based approach and has been deleted — see git history.)
 - **`Quote_Req.Material` has no FK constraint back to `Material`** —
   confirmed via `check_quote_req_schema.py`'s `INFORMATION_SCHEMA`
   query, not assumed. This is precisely what makes custom lines safe:
@@ -447,8 +449,10 @@ part_length`):
   piece + kerf, *not* rounded up to whole sticks), rounded to the
   nearest inch. The shop doesn't use `Quantity_Per`/`Est_Qty` for these
   lines at all — only `Part_Length` matters for a length-bearing item.
-- A **single-length line**: same treatment, `Part_Length` is just that
-  one length.
+- A **single-length line**: same treatment, `Part_Length` is the total
+  length, `Quantity × CutLengthIn` (no kerf, no nesting). Only reached by
+  materials stocked in ft/in whose callout has no linear shape code;
+  everything with TU/AN/BR/PI is nested instead.
 - A **plain piece-count line** (hardware/vendor, no length concept at
   all): `Quantity_Per` carries the real piece count; `Part_Length` is
   unset.

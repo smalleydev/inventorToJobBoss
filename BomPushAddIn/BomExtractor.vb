@@ -350,7 +350,9 @@ Public Class BomExtractor
     ''' <summary>
     ''' Maps the Material description string to a linear-stock category.
     ''' Returns "" for anything that isn't linear stock (plate, sheet,
-    ''' angle, vendor items...).
+    ''' vendor items...). Only categorized parts get their length
+    ''' parameter read (see BuildTree), so every linear shape must be
+    ''' listed here or its length is silently dropped.
     ''' </summary>
     Private Function DetectCategory(material As String) As String
 
@@ -365,6 +367,13 @@ Public Class BomExtractor
         ElseIf matUpper.Contains("BR SQ") OrElse matUpper.Contains("SQ BR") OrElse
                matUpper.Contains("BR RQ") OrElse matUpper.Contains("RQ BR") Then
             Return "BAR"
+        ElseIf Regex.IsMatch(matUpper, "\bAN\b") Then
+            ' Whole word, same as JL Check's _has_shape_code: "AN" must not
+            ' fire inside words like "PAN" or "CHANNEL".
+            Return "ANGLE"
+        ElseIf Regex.IsMatch(matUpper, "\bPI\b") Then
+            ' Whole word: must not fire on "PIN", "PIPE CLAMP" vendor text.
+            Return "PIPE"
         End If
 
         Return ""

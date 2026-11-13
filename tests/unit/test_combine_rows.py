@@ -113,3 +113,62 @@ def test_to_export_row_projects_export_fields():
     assert tuple(out) == main.EXPORT_FIELDS
     assert out["PartNumber"] == "P1"
     assert out["Quantity"] is None
+
+
+# --- Sorting ----------------------------------------------------------------
+
+def test_traveler_state_sorts_by_priority():
+    rows = [{"TravelerState": s} for s in ("Clean", "Needs Attention", "Bogus", "Ignored")]
+    ordered = sorted(rows, key=lambda r: main._sort_value(r, "TravelerState"))
+    assert [r["TravelerState"] for r in ordered] == [
+        "Needs Attention", "Ignored", "Clean", "Bogus",
+    ]
+
+
+def test_mixed_type_column_sorts_without_error():
+    # Regression: None/number/str in one column used to raise TypeError.
+    rows = [{"CutLengthIn": v} for v in ("abc", 12.5, None, 3, "", "ABC")]
+    ordered = sorted(rows, key=lambda r: main._sort_value(r, "CutLengthIn"))
+    assert [r["CutLengthIn"] for r in ordered] == [None, "", 3, 12.5, "ABC", "abc"]
+
+
+def test_missing_key_sorts_with_blanks():
+    rows = [{"Material": "B"}, {}, {"Material": "A"}]
+    ordered = sorted(rows, key=lambda r: main._sort_value(r, "Material"))
+    assert [r.get("Material") for r in ordered] == [None, "A", "B"]
+
+
+# --- Nesting failure reasons ------------------------------------------------
+
+def test_failure_types_are_distinct(cursor):
+    from stock_nesting import OversizedPieceError
+
+    with pytest.raises(main.MissingStickLengthError):
+        main._combine_rows([tube("T1", "28-0005", 1, 10)], cursor)
+    with pytest.raises(main.EmptyNestError):
+        main._combine_rows([tube("T1", "28-0003", 0, 10)], cursor)
+    with pytest.raises(OversizedPieceError):
+        main._combine_rows([tube("T1", "28-0003", 1, 300)], cursor)
+
+
+def test_failure_reason_names_the_actual_cause(cursor):
+    # Regression: every nesting failure used to say "missing setup data".
+    reasons = []
+    for rows in ([tube("T1", "28-0005", 1, 10)], [tube("T1", "28-0003", 0, 10)],
+                 [tube("T1", "28-0003", 1, 300)]):
+        with pytest.raises(ValueError) as info:
+            main._combine_rows(rows, cursor)
+        reasons.append(main._nesting_failure_reason(info.value))
+    assert reasons == [
+        "a material is missing setup data in JobBOSS",
+        "a nested material has no quantity to cut",
+        "a cut is longer than its material's stick length",
+    ]
+
+
+def test_pipe_rows_are_nested(cursor):
+    rows = [{**tube("P1", "28-0003", 2, 100), "Category": "PIPE"},
+            {**tube("P2", "28-0003", 1, 50), "Category": "PIPE"}]
+    [out] = main._combine_rows(rows, cursor)
+    assert out["Description"].startswith("Nested (3 cuts, 2 sticks)")
+    assert out["MaterialUsedIn"] == pytest.approx(240 + 50.125)

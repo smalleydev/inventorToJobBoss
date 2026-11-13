@@ -44,7 +44,7 @@ from resolve_dialog import ResolveDialog
 from quote_locked_dialog import QuoteLockedDialog
 from push_outcome_dialog import PushOutcomeDialog
 from settings import get_theme, set_theme
-from stock_nesting import expand_pieces, nest_pieces
+from stock_nesting import OversizedPieceError, expand_pieces, nest_pieces
 from theme import apply_theme
 from traveler_state import SORT_ORDER as TRAVELER_STATE_SORT_ORDER
 from traveler_state import compute_traveler_state
@@ -63,7 +63,7 @@ NEEDS_RESOLUTION_STATUSES = frozenset({
 # Categories whose length-bearing rows go through stock nesting at
 # Finalize time instead of simple material+length grouping. Must match
 # traveler_state.py's LENGTH_REQUIRED_CATEGORIES.
-NESTED_CATEGORIES = frozenset({"TUBE", "ANGLE", "BAR", "ROUND BAR"})
+NESTED_CATEGORIES = frozenset({"TUBE", "ANGLE", "BAR", "ROUND BAR", "PIPE"})
 
 # Fields included in the finalized export payload — everything else on a
 # working row is internal bookkeeping (e.g. _orig_index, Children) or an
@@ -98,6 +98,25 @@ EXPORT_FIELDS = (
 INCHES_PER_FOOT = 12
 
 
+class MissingStickLengthError(ValueError):
+    """Material.IS_Length is unset, so a linear material can't be nested."""
+
+
+class EmptyNestError(ValueError):
+    """A nested material group produced no material-consumed total."""
+
+
+def _nesting_failure_reason(exc: ValueError) -> str:
+    """Plain-language cause for the Finalize error box, by exception type."""
+    if isinstance(exc, MissingStickLengthError):
+        return "a material is missing setup data in JobBOSS"
+    if isinstance(exc, OversizedPieceError):
+        return "a cut is longer than its material's stick length"
+    if isinstance(exc, EmptyNestError):
+        return "a nested material has no quantity to cut"
+    return "nesting failed"
+
+
 def _stick_length_to_inches(value: float, uofm: str | None) -> float:
     """Convert a JobBOSS length value to inches based on the material's
     Stocked_UofM. Only "ft" needs conversion — "in" (and anything else,
@@ -120,7 +139,7 @@ def _get_stick_length(cursor, jobboss_material: str, uofm: str | None) -> float:
     )
     row = cursor.fetchone()
     if row is None or row.IS_Length in (None, 0, 0.0):
-        raise ValueError(
+        raise MissingStickLengthError(
             f"Material '{jobboss_material}' has no IS_Length (stick length) "
             f"set in JobBOSS — cannot nest cuts for this material."
         )
@@ -231,7 +250,7 @@ def _combine_rows(rows: list[dict], cursor) -> list[dict]:
         # fallback for, so it would hard-fail there instead of here,
         # after the engineer already thinks Finalize succeeded.
         if result.total_material_used_in in (None, 0, 0.0):
-            raise ValueError(
+            raise EmptyNestError(
                 f"Nesting for material '{material_key}' produced no "
                 f"material-consumed total (every row's Quantity is 0 or "
                 f"the cut list is empty) — cannot finalize this line. "
@@ -279,6 +298,25 @@ def _combine_rows(rows: list[dict], cursor) -> list[dict]:
         })
 
     return combined
+
+
+def _sort_value(row: dict, key: str) -> tuple:
+    """Sort key for one working-table row.
+
+    TravelerState sorts by fixed priority (Needs Attention first).
+    Every other column sorts by its own value: blanks (None / "") first,
+    as before, then numbers, then text. The rank in the first tuple slot
+    keeps mixed-type columns comparable: comparing a None or a number
+    against a string used to raise TypeError and abort the sort.
+    """
+    value = row.get(key)
+    if key == "TravelerState":
+        return (0, TRAVELER_STATE_SORT_ORDER.get(value, 99))
+    if value is None or value == "":
+        return (0, "")
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return (1, value)
+    return (2, str(value))
 
 
 def _to_export_row(row: dict) -> dict:
@@ -775,8 +813,8 @@ class MainWindow(QMainWindow):
                 for c in result.candidates
             ]
 
-        # The Inventor extractor only categorizes TUBE/ROUND BAR/BAR;
-        # fill in SHEET/PLATE/ANGLE here from the material string.
+        # Fill in SHEET/PLATE (never set by the add-in) and ANGLE/PIPE
+        # (only set by current add-in builds) from the material string.
         if not resolved.get("Category"):
             secondary = classify_secondary_category(resolved.get("Material", ""))
             if secondary:
@@ -888,11 +926,7 @@ class MainWindow(QMainWindow):
     # --- Sorting (both panels in lockstep) -----------------------------------
 
     def _sort_value(self, row: dict, key: str):
-        """TravelerState sorts by fixed priority (Needs Attention first);
-        everything else sorts by its own value."""
-        if key == "TravelerState":
-            return TRAVELER_STATE_SORT_ORDER.get(row.get(key), 99)
-        return row.get(key, "")
+        return _sort_value(row, key)
 
     def _apply_sort(self, key: str, reverse: bool = False) -> None:
         """Sort the working table by `key`, then reorder the base table to
@@ -1081,7 +1115,7 @@ class MainWindow(QMainWindow):
         except ValueError as exc:
             QMessageBox.critical(
                 self, "Nesting failed",
-                f"Could not finalize — a material is missing setup data:\n\n{exc}"
+                f"Could not finalize — {_nesting_failure_reason(exc)}:\n\n{exc}"
             )
             return
 

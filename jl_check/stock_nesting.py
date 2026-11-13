@@ -16,7 +16,7 @@ so the packing accounts for blade waste on every cut, not just gaps
 between pieces.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 # Fixed per-cut kerf allowance, inches. Applied to every individual
 # piece regardless of material — not a per-material or per-shape value.
@@ -31,6 +31,10 @@ KERF_ALLOWANCE_IN = 0.125
 # above typical float noise, so it absorbs the noise without masking a
 # genuine oversize.
 FLOAT_TOLERANCE_IN = 1e-6
+
+
+class OversizedPieceError(ValueError):
+    """A single piece (plus kerf) is longer than the stick it must be cut from."""
 
 
 @dataclass
@@ -66,7 +70,7 @@ def nest_pieces(piece_lengths_in: list[float], stick_length_in: float,
 
     oversized = [p for p in pieces if p > stick_length_in + FLOAT_TOLERANCE_IN]
     if oversized:
-        raise ValueError(
+        raise OversizedPieceError(
             f"Piece length {max(oversized):.3f}in (including {kerf_in}in kerf) "
             f"exceeds the stick length of {stick_length_in}in — this piece "
             f"cannot be cut from this stock."

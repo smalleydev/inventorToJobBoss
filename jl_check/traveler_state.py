@@ -46,10 +46,6 @@ inline edit.
 
 Rule order in compute_traveler_state:
   1. Explicit engineer ignore always wins.
-  1b. "REFERENCE" (whole word) in Material or Description -> Ignored.
-      Reference-only models; their line lives elsewhere (e.g. the
-      electrical BOM). Checked before any match-status rule, so an
-      exact JobBOSS match can't pull it back in.
   1c. PartNumber or vendor number starts with an IGNORED_PART_NUMBER_PREFIXES
       entry ("10-") -> Ignored, unless listed in IGNORED_PREFIX_EXCEPTIONS.
   2. Custom line -> Custom, unconditionally. Set once at creation and
@@ -101,8 +97,6 @@ Rule order in compute_traveler_state:
      upstream bug and Needs Attention is the safe failure mode).
 """
 
-import re
-
 # MatchStatus values that count as an EXACT JobBOSS match — the part
 # number (or vendor number, or an embedded JB# reference) matched a
 # real Material row directly, as opposed to being inferred from a
@@ -124,24 +118,13 @@ SPECIAL_REVIEW_STATUSES = frozenset({"needs_review_uhmw", "needs_review_lexan"})
 UNRESOLVED_STATUSES = frozenset({
     "ambiguous",
     "not_found",
+    # Reserved: nothing assigns this status yet. Kept so a future
+    # "create new material" flow lands in Needs Attention by default.
     "new_material_needed",
 }) | SPECIAL_REVIEW_STATUSES
 
 # Categories excluded from the JobBOSS export entirely.
 EXCLUDED_CATEGORIES = frozenset({"SHEET", "PLATE"})
-
-# Parts modeled in Inventor for fit/reference only — their real line item
-# lives elsewhere (e.g. the electrical BOM). Engineering marks these by
-# putting the word REFERENCE in the Material or Description, e.g.
-#   "Saginaw SCE-20EL2008LP: 33-0013 (REFERENCE. SEE ELECTRICAL BOM)"
-# Whole word, case-insensitive — won't fire on "PREFERENCE"/"REFERENCED".
-REFERENCE_MARKER = re.compile(r"\bREFERENCE\b", re.IGNORECASE)
-
-# Inventor part-number prefixes that are always excluded from the export,
-# regardless of material, description, or JobBOSS match. Tuple so a future
-# prefix is a one-line addition. Include the trailing hyphen — "10-" must
-# not catch "100-..." or "1000-...".
-IGNORED_PART_NUMBER_PREFIXES = ("10-",)
 
 # Part-number families excluded from the export outright, checked against
 # both the Inventor PartNumber and the vendor number ("VENDOR 10-0341" ->
@@ -156,7 +139,7 @@ IGNORED_PREFIX_EXCEPTIONS = frozenset({
 })
 
 # Categories that carry a real linear cut length.
-LENGTH_REQUIRED_CATEGORIES = frozenset({"TUBE", "ANGLE", "BAR", "ROUND BAR"})
+LENGTH_REQUIRED_CATEGORIES = frozenset({"TUBE", "ANGLE", "BAR", "ROUND BAR", "PIPE"})
 
 # Statuses where the JobBOSS material IS raw stock — meaning the length
 # had to come from the CAD model, not from the material record itself.
@@ -221,11 +204,6 @@ def compute_traveler_state(row: dict) -> str:
     # excluded outright unless explicitly listed as an exception. Before
     # rule 3 so "NA" + "VENDOR 10-xxxx" lands in Ignored, not Needs Attention.
     if _in_ignored_family(row):
-        return "Ignored"
-
-    # 1c. Ignored part-number family — excluded outright, whatever the
-    # lookup found. Same placement rationale as 1b.
-    if (row.get("PartNumber") or "").strip().upper().startswith(IGNORED_PART_NUMBER_PREFIXES):
         return "Ignored"
 
     # 2. Custom line item — added directly via "Add Custom Line," never

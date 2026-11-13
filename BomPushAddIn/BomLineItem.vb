@@ -33,7 +33,7 @@ Public Class BomLineItem
     Public Property Material As String
 
     ''' <summary>Stock category derived from the Material string:
-    ''' "TUBE", "ROUND BAR", "BAR", or "" for everything else.</summary>
+    ''' "TUBE", "ROUND BAR", "BAR", "ANGLE", "PIPE", or "" for everything else.</summary>
     Public Property Category As String
 
     ''' <summary>Comments iProperty (Summary Information property set —
@@ -72,7 +72,7 @@ Public Class BomLineItem
 
     '--- Cut / stock data -------------------------------------------------------
 
-    ''' <summary>Cut length in inches, pulled for TUBE / ROUND BAR / BAR
+    ''' <summary>Cut length in inches, pulled for TUBE / ROUND BAR / BAR / ANGLE / PIPE
     ''' categories from the "length" User Defined Property (already inches),
     ''' falling back to the "LENGTH" model parameter (cm, converted).
     ''' 0 when no length data exists on the part.</summary>
