@@ -124,7 +124,7 @@ confirm the files you expect to see actually appear in that list.
 ## Step 6 — Build and deploy (only if the change affects a running/shared component)
 
 Not every change needs this step — a fix that only affects local dev
-tooling (e.g. `db_test.py`) doesn't need rebuilding or redeploying
+tooling (e.g. `jl_check/scripts/dump_quote_tables.py`) doesn't need rebuilding or redeploying
 anywhere. Skip to Step 7 if nothing shared changed.
 
 ### 6a — `bompush_service` (PyInstaller build, runs as a Windows Service)

@@ -5,12 +5,12 @@ synthetic quote with many lines (reusing a handful of known-good
 materials from earlier testing, since row COUNT is what we're timing,
 not material variety) and measures real elapsed time.
 
-Same safety pattern as test_write_quote.py: prints a plan, asks for
+Same safety pattern as write_quote_manual.py: prints a plan, asks for
 confirmation before writing, asks again before committing, rolls back
 cleanly if you say no at either point.
 
 Usage:
-    python large_bom_test.py [line_count]
+    python large_bom_manual.py [line_count]
     (defaults to 300 lines if not given)
 """
 
@@ -18,7 +18,7 @@ import sys
 import time
 import uuid
 
-from db import get_connection
+from _testprod_guard import testprod_connection
 from quote_writer import QuoteLine, write_quote
 
 # Materials confirmed to exist in TESTPROD from earlier testing — mixed
@@ -59,7 +59,7 @@ def main():
         print("Aborted, nothing written.")
         return
 
-    conn = get_connection()
+    conn = testprod_connection()
     conn.autocommit = False
     cursor = conn.cursor()
 

@@ -1,26 +1,26 @@
 """
-Run this AFTER killing mid_write_kill_test.py via Task Manager, to
+Run this AFTER killing mid_write_kill_manual.py via Task Manager, to
 verify the abandoned transaction really did roll back — i.e. the
 RFQ/Quote rows it printed as "inserted" never actually persisted.
 
 Usage:
-    python mid_write_kill_test_verify.py KILL_TEST_XXXXXXXX
+    python mid_write_kill_verify.py KILL_TEST_XXXXXXXX
 """
 
 import sys
 
-from db import get_connection
+from _testprod_guard import testprod_connection
 
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python mid_write_kill_test_verify.py KILL_TEST_XXXXXXXX")
+        print("Usage: python mid_write_kill_verify.py KILL_TEST_XXXXXXXX")
         sys.exit(1)
 
     test_quote = sys.argv[1]
     print(f"Verifying: {test_quote}\n")
 
-    conn = get_connection()
+    conn = testprod_connection()
     cursor = conn.cursor()
 
     print("=== Integration.BOM_Staging_Header ===")

@@ -110,8 +110,8 @@ quote disappear" question ever comes up.
 - **The primary-key claim lock in `try_claim_quote`** is a genuinely
   correct pattern for cross-process mutual exclusion without needing
   `DELETE` rights or a stored procedure — verified under real
-  concurrent load (`race_test.py`) and under a hard-killed process
-  (`mid_write_kill_test.py`/`_verify.py`), not just asserted.
+  concurrent load (`scripts/manual/race_claim_manual.py`) and under a hard-killed process
+  (`scripts/manual/mid_write_kill_manual.py` / `mid_write_kill_verify.py`), not just asserted.
 
 ---
 

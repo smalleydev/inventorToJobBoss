@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  python:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      # Lint scope widens phase by phase as modules are cleaned up.
+      - name: Lint
+        run: ruff check tests
+      # Unit tests only: integration tests (TESTPROD) are excluded by the
+      # default addopts in pyproject.toml and never run in CI. tests/conftest.py
+      # also blocks pyodbc.connect, so nothing here can reach a database.
+      - name: Unit tests
+        run: pytest
