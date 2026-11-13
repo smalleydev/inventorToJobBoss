@@ -43,15 +43,15 @@ def test_exception_list_applies_to_vendor_number():
     assert compute_traveler_state(r) == "Clean"
 
 
-@pytest.mark.xfail(reason="BUG: duplicate rule-1c block ignores IGNORED_PREFIX_EXCEPTIONS "
-                          "for PartNumber matches (fix in bugfix phase)")
-def test_exception_list_applies_to_part_number():
-    assert compute_traveler_state(row(PartNumber="10-2101", JobBossMaterial="10-2101")) == "Clean"
+@pytest.mark.parametrize("pn", ["10-2101", "10-6210", "10-2129", "10-1655", "10-5796",
+                                " 10-2101 "])
+def test_exception_list_applies_to_part_number(pn):
+    # Regression: a duplicate rule-1c block used to ignore these anyway.
+    assert compute_traveler_state(row(PartNumber=pn, JobBossMaterial="10-2101")) == "Clean"
 
 
-def test_exception_part_number_currently_ignored():
-    """Current (buggy) behavior, kept visible until the fix lands."""
-    assert compute_traveler_state(row(PartNumber="10-2101", JobBossMaterial="10-2101")) == "Ignored"
+def test_non_exception_in_family_still_ignored_with_exact_match():
+    assert compute_traveler_state(row(PartNumber="10-2102", JobBossMaterial="10-2102")) == "Ignored"
 
 
 # --- Rules 2-6 --------------------------------------------------------------

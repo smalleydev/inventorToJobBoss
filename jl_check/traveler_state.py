@@ -137,12 +137,6 @@ EXCLUDED_CATEGORIES = frozenset({"SHEET", "PLATE"})
 # Whole word, case-insensitive — won't fire on "PREFERENCE"/"REFERENCED".
 REFERENCE_MARKER = re.compile(r"\bREFERENCE\b", re.IGNORECASE)
 
-# Inventor part-number prefixes that are always excluded from the export,
-# regardless of material, description, or JobBOSS match. Tuple so a future
-# prefix is a one-line addition. Include the trailing hyphen — "10-" must
-# not catch "100-..." or "1000-...".
-IGNORED_PART_NUMBER_PREFIXES = ("10-",)
-
 # Part-number families excluded from the export outright, checked against
 # both the Inventor PartNumber and the vendor number ("VENDOR 10-0341" ->
 # "10-0341"). Include the trailing hyphen so "10-" can't catch "100-...".
@@ -221,11 +215,6 @@ def compute_traveler_state(row: dict) -> str:
     # excluded outright unless explicitly listed as an exception. Before
     # rule 3 so "NA" + "VENDOR 10-xxxx" lands in Ignored, not Needs Attention.
     if _in_ignored_family(row):
-        return "Ignored"
-
-    # 1c. Ignored part-number family — excluded outright, whatever the
-    # lookup found. Same placement rationale as 1b.
-    if (row.get("PartNumber") or "").strip().upper().startswith(IGNORED_PART_NUMBER_PREFIXES):
         return "Ignored"
 
     # 2. Custom line item — added directly via "Add Custom Line," never
