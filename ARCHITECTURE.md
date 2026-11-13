@@ -412,10 +412,9 @@ to get subtly wrong by inference alone:
   the business-key column is left `NULL` on insert. `_insert_and_get_
   generated_key` leans on this directly: insert with the key column
   NULL, capture the row via `SCOPE_IDENTITY()`, then re-query for the
-  trigger-populated business key. (`jobboss_keys.py`'s `next_key` was
-  an earlier attempt at replicating `p_GetNextKey` calls directly —
-  since superseded by this trigger-based approach and no longer called
-  anywhere; see `CODE_REVIEW.md`.)
+  trigger-populated business key. (An earlier `jobboss_keys.py`
+  replicated `p_GetNextKey` calls directly; it was superseded by this
+  trigger-based approach and has been deleted — see git history.)
 - **`Quote_Req.Material` has no FK constraint back to `Material`** —
   confirmed via `check_quote_req_schema.py`'s `INFORMATION_SCHEMA`
   query, not assumed. This is precisely what makes custom lines safe:
