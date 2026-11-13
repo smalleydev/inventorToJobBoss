@@ -103,13 +103,16 @@ reports `Quantity = 8`, not `1`.
    silently to the first occurrence's length. Worth resolving before
    this ever bites a real nested cut list.
 
-**Category detection** (`DetectCategory`) only recognizes `TUBE`,
-`ROUND BAR`, and `BAR` from the `Material` string at extraction time.
-`SHEET`, `PLATE`, and `ANGLE` are deliberately *not* detected here —
-that classification happens later, in JL Check (`classify_secondary_
-category`), during the walk. Splitting it this way means the Inventor
-add-in doesn't need updating every time a new secondary category
-matters to the JobBOSS matching logic — only the Python side does.
+**Category detection** (`DetectCategory`) recognizes every *linear*
+stock shape from the `Material` string at extraction time: `TUBE`,
+`ROUND BAR`, `BAR`, `ANGLE` (`AN`) and `PIPE` (`PI`). It has to: the
+add-in only reads a part's length parameter when it has a category, so
+a linear shape missing here loses its model length, and a new-style
+part arrives looking like an old-style one. (`ANGLE` used to be left
+to JL Check, so angle lengths were never read.) `SHEET` and `PLATE`
+carry no length and are still classified only in JL Check
+(`classify_secondary_category`), which also fills in `ANGLE`/`PIPE`
+for exports made by older add-in builds.
 
 **Cut length** (`TryGetLengthInches`) tries a "length" **User Defined
 Property** first (already stored as a formatted inch string like
@@ -296,7 +299,7 @@ Two different combining strategies, depending on category:
 - **Simple combine** (hardware, vendor items, anything not in
   `NESTED_CATEGORIES`): grouped by `(JobBossMaterial, CutLengthIn)` —
   an *exact* match on both — quantities summed within each group.
-- **Nested combine** (`TUBE`/`ANGLE`/`BAR`/`ROUND BAR` with a real cut
+- **Nested combine** (`TUBE`/`ANGLE`/`BAR`/`ROUND BAR`/`PIPE` with a real cut
   length): grouped by material **only**, ignoring length, and run
   through `stock_nesting.nest_pieces` — a first-fit-decreasing bin-
   packing heuristic. Every individual piece across every length of
