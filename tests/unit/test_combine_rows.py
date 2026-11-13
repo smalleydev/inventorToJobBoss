@@ -113,3 +113,26 @@ def test_to_export_row_projects_export_fields():
     assert tuple(out) == main.EXPORT_FIELDS
     assert out["PartNumber"] == "P1"
     assert out["Quantity"] is None
+
+
+# --- Sorting ----------------------------------------------------------------
+
+def test_traveler_state_sorts_by_priority():
+    rows = [{"TravelerState": s} for s in ("Clean", "Needs Attention", "Bogus", "Ignored")]
+    ordered = sorted(rows, key=lambda r: main._sort_value(r, "TravelerState"))
+    assert [r["TravelerState"] for r in ordered] == [
+        "Needs Attention", "Ignored", "Clean", "Bogus",
+    ]
+
+
+def test_mixed_type_column_sorts_without_error():
+    # Regression: None/number/str in one column used to raise TypeError.
+    rows = [{"CutLengthIn": v} for v in ("abc", 12.5, None, 3, "", "ABC")]
+    ordered = sorted(rows, key=lambda r: main._sort_value(r, "CutLengthIn"))
+    assert [r["CutLengthIn"] for r in ordered] == [None, "", 3, 12.5, "ABC", "abc"]
+
+
+def test_missing_key_sorts_with_blanks():
+    rows = [{"Material": "B"}, {}, {"Material": "A"}]
+    ordered = sorted(rows, key=lambda r: main._sort_value(r, "Material"))
+    assert [r.get("Material") for r in ordered] == [None, "A", "B"]

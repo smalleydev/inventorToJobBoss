@@ -281,6 +281,25 @@ def _combine_rows(rows: list[dict], cursor) -> list[dict]:
     return combined
 
 
+def _sort_value(row: dict, key: str) -> tuple:
+    """Sort key for one working-table row.
+
+    TravelerState sorts by fixed priority (Needs Attention first).
+    Every other column sorts by its own value: blanks (None / "") first,
+    as before, then numbers, then text. The rank in the first tuple slot
+    keeps mixed-type columns comparable: comparing a None or a number
+    against a string used to raise TypeError and abort the sort.
+    """
+    value = row.get(key)
+    if key == "TravelerState":
+        return (0, TRAVELER_STATE_SORT_ORDER.get(value, 99))
+    if value is None or value == "":
+        return (0, "")
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return (1, value)
+    return (2, str(value))
+
+
 def _to_export_row(row: dict) -> dict:
     """Trim a working row down to just the fields the push service needs."""
     return {key: row.get(key) for key in EXPORT_FIELDS}
@@ -888,11 +907,7 @@ class MainWindow(QMainWindow):
     # --- Sorting (both panels in lockstep) -----------------------------------
 
     def _sort_value(self, row: dict, key: str):
-        """TravelerState sorts by fixed priority (Needs Attention first);
-        everything else sorts by its own value."""
-        if key == "TravelerState":
-            return TRAVELER_STATE_SORT_ORDER.get(row.get(key), 99)
-        return row.get(key, "")
+        return _sort_value(row, key)
 
     def _apply_sort(self, key: str, reverse: bool = False) -> None:
         """Sort the working table by `key`, then reorder the base table to
