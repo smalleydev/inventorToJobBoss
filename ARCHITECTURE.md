@@ -449,8 +449,10 @@ part_length`):
   piece + kerf, *not* rounded up to whole sticks), rounded to the
   nearest inch. The shop doesn't use `Quantity_Per`/`Est_Qty` for these
   lines at all — only `Part_Length` matters for a length-bearing item.
-- A **single-length line**: same treatment, `Part_Length` is just that
-  one length.
+- A **single-length line**: same treatment, `Part_Length` is the total
+  length, `Quantity × CutLengthIn` (no kerf, no nesting). Only reached by
+  materials stocked in ft/in whose callout has no linear shape code;
+  everything with TU/AN/BR/PI is nested instead.
 - A **plain piece-count line** (hardware/vendor, no length concept at
   all): `Quantity_Per` carries the real piece count; `Part_Length` is
   unset.

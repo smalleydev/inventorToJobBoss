@@ -32,6 +32,8 @@ def test_custom_line_info():
     (QuoteLine("M", 2, total_stock_length_in=480, material_used_in=290.125), (0.0, 290)),
     (QuoteLine("M", 2, total_stock_length_in=480), (0.0, 480)),  # fallback
     (QuoteLine("M", 1, cut_length_in=36.5), (0.0, 36.5)),
+    # Regression: quantity used to be dropped (4 x 36" quoted as 36").
+    (QuoteLine("M", 4, cut_length_in=36), (0.0, 144)),
     (QuoteLine("M", 4), (4, None)),
     (QuoteLine("M", 4, cut_length_in=0, total_stock_length_in=0), (4, None)),
 ])
@@ -147,3 +149,10 @@ def test_missing_identity_raises():
     cursor.handlers.insert(0, lambda sql, _p: [] if "SCOPE_IDENTITY" in sql else None)
     with pytest.raises(RuntimeError, match="did not return an identity"):
         write_quote(cursor, "Q", "P", "D", [])
+
+
+def test_single_length_line_writes_total_length():
+    cursor = jobboss(materials={"40-0001": {"Description": "CABLE", "Stocked_UofM": "ft"}})
+    write_quote(cursor, "Q", "P", "D", [QuoteLine("40-0001", 4, cut_length_in=36)])
+    [req] = cursor.calls_matching("INSERT INTO Quote_Req (")
+    assert (req.params[8], req.params[12]) == (0.0, 144)  # Quantity_Per, Part_Length

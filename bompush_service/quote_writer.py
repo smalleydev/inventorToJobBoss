@@ -25,7 +25,9 @@ up from Material — the same source the JobBOSS client reads from.
 
 TWO KINDS OF LINE, per JL Check's stock-nesting combine step:
   - Single-length line: cut_length_in is set, total_stock_length_in is
-    None. Part_Length is that one length, in inches. Quantity_Per and
+    None. Part_Length is the TOTAL length (quantity x cut_length_in),
+    in inches, the same "total material" meaning a nested line's
+    Part_Length has. Quantity_Per and
     Est_Qty are deliberately left at 0 — the shop doesn't use those
     fields for material lines that carry a length, only Part_Length.
     (Hardware/vendor rows are single-length lines with cut_length_in
@@ -180,7 +182,9 @@ def _line_quantity_and_part_length(line: "QuoteLine") -> tuple[float, float | No
         CONSUMED (material_used_in), rounded to the nearest inch — not
         the rounded-up-to-whole-sticks order amount.
       - Single-length line (cut_length_in set): quantity is also 0, for
-        the same reason. Part_Length is the one length, in inches.
+        the same reason. Part_Length is quantity x cut_length_in, the
+        total length needed. (It used to be one piece's length, which
+        dropped the quantity: 4 x 36" was quoted as 36".)
       - Plain piece-count line (neither set): quantity is the real
         piece count (this is the normal "each" quantity, unrelated to
         the length-line convention above); no Part_Length.
@@ -194,7 +198,7 @@ def _line_quantity_and_part_length(line: "QuoteLine") -> tuple[float, float | No
         return 0.0, part_length
 
     if line.cut_length_in not in (None, 0, 0.0):
-        return 0.0, line.cut_length_in
+        return 0.0, line.quantity * line.cut_length_in
 
     return line.quantity, None
 
