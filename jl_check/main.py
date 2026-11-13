@@ -63,7 +63,7 @@ NEEDS_RESOLUTION_STATUSES = frozenset({
 # Categories whose length-bearing rows go through stock nesting at
 # Finalize time instead of simple material+length grouping. Must match
 # traveler_state.py's LENGTH_REQUIRED_CATEGORIES.
-NESTED_CATEGORIES = frozenset({"TUBE", "ANGLE", "BAR", "ROUND BAR"})
+NESTED_CATEGORIES = frozenset({"TUBE", "ANGLE", "BAR", "ROUND BAR", "PIPE"})
 
 # Fields included in the finalized export payload — everything else on a
 # working row is internal bookkeeping (e.g. _orig_index, Children) or an
@@ -813,8 +813,8 @@ class MainWindow(QMainWindow):
                 for c in result.candidates
             ]
 
-        # The Inventor extractor only categorizes TUBE/ROUND BAR/BAR;
-        # fill in SHEET/PLATE/ANGLE here from the material string.
+        # Fill in SHEET/PLATE (never set by the add-in) and ANGLE/PIPE
+        # (only set by current add-in builds) from the material string.
         if not resolved.get("Category"):
             secondary = classify_secondary_category(resolved.get("Material", ""))
             if secondary:

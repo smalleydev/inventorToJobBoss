@@ -139,7 +139,7 @@ IGNORED_PREFIX_EXCEPTIONS = frozenset({
 })
 
 # Categories that carry a real linear cut length.
-LENGTH_REQUIRED_CATEGORIES = frozenset({"TUBE", "ANGLE", "BAR", "ROUND BAR"})
+LENGTH_REQUIRED_CATEGORIES = frozenset({"TUBE", "ANGLE", "BAR", "ROUND BAR", "PIPE"})
 
 # Statuses where the JobBOSS material IS raw stock — meaning the length
 # had to come from the CAD model, not from the material record itself.

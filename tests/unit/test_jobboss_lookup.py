@@ -62,6 +62,8 @@ def test_escape_like():
     ("HRS SH 10GA 18-0025", "SHEET"),
     ("A36 PL .25 X 4", "PLATE"),
     ("A36 AN 2 X 2 X .25", "ANGLE"),
+    ("A53 PI SCH40 2 NPS 28-0400", "PIPE"),
+    ("PIN DOWEL", ""),  # no whole-word PI
     ("BUSHING BRONZE", ""),  # no whole-word SH
     ("", ""),
 ])

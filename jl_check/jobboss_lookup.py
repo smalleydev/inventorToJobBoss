@@ -184,14 +184,17 @@ def _fetch_material(cursor, material_number: str):
 
 def classify_secondary_category(material_field: str) -> str:
     """
-    Categories NOT set by the Inventor extractor (which only tags TUBE,
-    ROUND BAR, and BAR):
+    Categories the Inventor extractor may not have set. Current add-in
+    builds tag TUBE, ROUND BAR, BAR, ANGLE and PIPE themselves; older
+    builds (and exports made with them) only tag the first three, so
+    ANGLE and PIPE are filled in here too:
 
       SHEET / PLATE — no linear length concept; excluded from the
         JobBOSS export entirely (sheet metal team handles them).
-      ANGLE — has a real length, but Inventor never pulled it for this
-        category; flagged via the "Needs Length" traveler state instead,
-        resolved by the user typing a value into the table.
+      ANGLE / PIPE — linear stock with a real length. Old-style parts
+        have no length parameter, so they're flagged "Needs Length" and
+        the engineer types one in; new-style parts carry the length
+        from the model.
 
     Returns "" for anything else.
     """
@@ -203,6 +206,8 @@ def classify_secondary_category(material_field: str) -> str:
         return "PLATE"
     if _has_shape_code(material_field, "AN"):
         return "ANGLE"
+    if _has_shape_code(material_field, "PI"):
+        return "PIPE"
     return ""
 
 

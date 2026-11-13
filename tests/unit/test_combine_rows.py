@@ -164,3 +164,11 @@ def test_failure_reason_names_the_actual_cause(cursor):
         "a nested material has no quantity to cut",
         "a cut is longer than its material's stick length",
     ]
+
+
+def test_pipe_rows_are_nested(cursor):
+    rows = [{**tube("P1", "28-0003", 2, 100), "Category": "PIPE"},
+            {**tube("P2", "28-0003", 1, 50), "Category": "PIPE"}]
+    [out] = main._combine_rows(rows, cursor)
+    assert out["Description"].startswith("Nested (3 cuts, 2 sticks)")
+    assert out["MaterialUsedIn"] == pytest.approx(240 + 50.125)

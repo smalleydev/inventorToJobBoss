@@ -149,3 +149,33 @@ def test_sort_order_puts_attention_first():
     assert sorted(SORT_ORDER, key=SORT_ORDER.get) == [
         "Needs Attention", "Needs Length", "Ignored", "Attended", "Clean", "Custom",
     ]
+
+
+# --- The three length scenarios ----------------------------------------------
+# 1. Each item: no length needed, none present.
+# 2. Old-style bar stock: no length parameter (add-in sends 0), so a length
+#    is needed; decided by the material callout (category) or the JobBOSS
+#    Stocked_UofM.
+# 3. New-style bar stock: length parameter filled, flows straight through.
+
+def test_scenario1_each_item_needs_no_length():
+    assert compute_traveler_state(row(JobBossUofM="ea", CutLengthIn=0)) == "Clean"
+
+
+@pytest.mark.parametrize("category", ["TUBE", "ANGLE", "BAR", "ROUND BAR", "PIPE"])
+def test_scenario2_by_material_callout(category):
+    r = row(MatchStatus="raw_stock_match", Category=category, JobBossUofM="ea", CutLengthIn=0)
+    assert compute_traveler_state(r) == "Needs Length"
+
+
+@pytest.mark.parametrize("uofm", ["ft", "in"])
+def test_scenario2_by_jobboss_uofm(uofm):
+    assert compute_traveler_state(row(Category="", JobBossUofM=uofm, CutLengthIn=0)) \
+        == "Needs Length"
+
+
+@pytest.mark.parametrize("category", ["TUBE", "ANGLE", "BAR", "ROUND BAR", "PIPE"])
+def test_scenario3_length_present(category):
+    r = row(MatchStatus="raw_stock_match", Category=category, JobBossUofM="ft",
+            CutLengthIn=34.75)
+    assert compute_traveler_state(r) == "Clean"
