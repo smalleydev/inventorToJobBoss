@@ -15,20 +15,20 @@ Quote insert) so the real, unmodified quote_writer.py never needs to be
 touched or temporarily hacked for this test.
 
 HOW TO RUN THIS TEST:
-  1. Run: python mid_write_kill_test.py
+  1. Run: python mid_write_kill_manual.py
   2. It claims a fresh test quote and writes RFQ + Quote rows in an
      open transaction, then counts down.
   3. During the countdown, open Task Manager and forcibly end this
      python.exe process (End Task) — do NOT press Ctrl+C, that's a
      clean shutdown and won't test the same thing.
-  4. Run mid_write_kill_test_verify.py with the TEST_QUOTE this script
+  4. Run mid_write_kill_verify.py with the TEST_QUOTE this script
      printed, to confirm nothing was left behind.
 """
 
 import time
 import uuid
 
-from db import get_connection
+from _testprod_guard import testprod_connection
 from staging import try_claim_quote
 
 TEST_QUOTE = f"KILL_TEST_{uuid.uuid4().hex[:8].upper()}"
@@ -39,7 +39,7 @@ def main():
     print(f"Testing quote number: {TEST_QUOTE}")
     print("(save this — you'll need it for the verification script)\n")
 
-    conn = get_connection()
+    conn = testprod_connection()
     conn.autocommit = False
     cursor = conn.cursor()
 

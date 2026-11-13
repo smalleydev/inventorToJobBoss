@@ -361,7 +361,7 @@ touching a file mid-write would read a truncated/invalid payload.
    `Integration.BOM_Staging_Header` keyed by `QuoteNumber`. This is the
    *real* lock: SQL Server's own primary-key constraint makes the claim
    atomic across processes with no race window, verified directly under
-   genuine simultaneous contention (`race_test.py`, using a
+   genuine simultaneous contention (`scripts/manual/race_claim_manual.py`, using a
    `threading.Barrier` to force two claim attempts as close to truly
    simultaneous as one machine can produce — exactly one succeeds, both
    times, every time). A row stuck in `PENDING` is *never*
@@ -378,8 +378,8 @@ touching a file mid-write would read a truncated/invalid payload.
 
 A hard-killed process mid-write (Task Manager "End Task," not a clean
 Ctrl+C) was tested directly, not just assumed safe:
-`mid_write_kill_test.py` opens a transaction, inserts RFQ + Quote rows,
-and waits for a forced kill; `mid_write_kill_test_verify.py` confirms
+`scripts/manual/mid_write_kill_manual.py` opens a transaction, inserts RFQ + Quote rows,
+and waits for a forced kill; `mid_write_kill_verify.py` confirms
 afterward that **zero** rows persisted from the abandoned transaction —
 SQL Server's own rollback-on-disconnect guarantee holds, meaning "reset
 a stuck PENDING row to ERROR" is genuinely safe, not just assumed to
@@ -473,7 +473,7 @@ really "sheet metal work," it's a stocked material that happens to
 carry a `SH`/`PL` shape code.
 
 **Job-specific part numbers can never match across two different
-jobs**, by definition (`compare_quotes.py`'s `comparison_key`
+jobs**, by definition (`jl_check/scripts/compare_quotes.py`'s `comparison_key`
 specifically strips the leading 5-digit job number for this reason
 when diffing two quotes) — this isn't a bug in the matching logic, it's
 inherent to what a job-specific part number *means*. If two jobs

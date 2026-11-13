@@ -13,14 +13,14 @@ Expected result: exactly one thread gets True, the other gets False,
 and exactly one header row exists afterward. If both ever got True, or
 if two header rows existed, the lock would be broken.
 
-Run: python race_test.py
+Run: python race_claim_manual.py
 """
 
 import threading
 import time
 import uuid
 
-from db import get_connection
+from _testprod_guard import testprod_connection
 from staging import try_claim_quote
 
 # Fresh quote number every run, so repeated test runs never collide
@@ -32,7 +32,7 @@ barrier = threading.Barrier(2)
 
 
 def attempt_claim(thread_name: str):
-    conn = get_connection()
+    conn = testprod_connection()
     conn.autocommit = False
     cursor = conn.cursor()
 
@@ -68,7 +68,7 @@ def main():
 
     # Verify only one header row actually exists — the real proof, not
     # just trusting the return values.
-    conn = get_connection()
+    conn = testprod_connection()
     cursor = conn.cursor()
     cursor.execute(
         "SELECT COUNT(*) AS c FROM Integration.BOM_Staging_Header WHERE QuoteNumber = ?",

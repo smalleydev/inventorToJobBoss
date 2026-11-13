@@ -5,13 +5,13 @@ TESTPROD, inside a transaction that's only committed if you explicitly
 confirm — so a bad write can be caught and rolled back before it sticks.
 
 Usage:
-    python test_write_quote.py path\to\28229-01A.json
+    python write_quote_manual.py path\to\28229-01A.json
 """
 
 import json
 import sys
 
-from db import get_connection
+from _testprod_guard import testprod_connection
 from quote_writer import QuoteLine, write_quote
 
 
@@ -58,7 +58,7 @@ def verify_in_search_view(cursor, quote_number: str) -> None:
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python test_write_quote.py path\\to\\export.json")
+        print("Usage: python write_quote_manual.py path\\to\\export.json")
         sys.exit(1)
 
     payload = load_export(sys.argv[1])
@@ -76,7 +76,7 @@ def main():
         print("Aborted, nothing written.")
         return
 
-    conn = get_connection()
+    conn = testprod_connection()
     conn.autocommit = False
     cursor = conn.cursor()
 
@@ -111,7 +111,7 @@ def main():
                 f"to '{quote_number}'? (yes/no): "
             )
             if test_guard.strip().lower() == "yes":
-                test_overwrite_guard(quote_number, lines, payload)
+                check_overwrite_guard(quote_number, lines, payload)
         else:
             conn.rollback()
             print("Rolled back — nothing was written.")
@@ -123,7 +123,7 @@ def main():
     finally:
         conn.close()
 
-def test_overwrite_guard(quote_number: str, lines: list[QuoteLine], payload: dict) -> None:
+def check_overwrite_guard(quote_number: str, lines: list[QuoteLine], payload: dict) -> None:
     """
     Attempts a second write_quote() call against the same quote_number
     that was just committed. Expects a ValueError from the new
@@ -132,7 +132,7 @@ def test_overwrite_guard(quote_number: str, lines: list[QuoteLine], payload: dic
     regardless of outcome, since this is a negative test — nothing from
     this attempt should ever be committed.
     """
-    conn = get_connection()
+    conn = testprod_connection()
     conn.autocommit = False
     cursor = conn.cursor()
 

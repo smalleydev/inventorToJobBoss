@@ -1,0 +1,34 @@
+# Repo-wide tooling config. The apps themselves are still run and built
+# from their own folders (see FEATURE_WORKFLOW.md); this file only
+# configures tests and linting.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Both app folders go on sys.path so tests import modules the same way
+# the apps do ("import traveler_state", "import quote_writer").
+# jl_check/db.py and bompush_service/db.py are byte-identical, so the
+# name clash on "db" is harmless until they're merged in jbcore.
+pythonpath = ["jl_check", "bompush_service"]
+# Integration tests (TESTPROD) never run unless asked for explicitly:
+#   pytest -m integration
+addopts = "-ra --strict-markers -m \"not integration\""
+markers = [
+    "integration: needs a live TESTPROD connection; never run in CI",
+    "qt: needs PySide6 (and a QApplication via pytest-qt)",
+]
+xfail_strict = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+# App folders count as first-party so imports sort like the apps see them.
+src = [".", "jl_check", "bompush_service"]
+extend-exclude = ["**/venv", "**/build", "**/dist", "**/.vs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.mypy]
+python_version = "3.13"
+ignore_missing_imports = true
+mypy_path = ["jl_check", "bompush_service"]

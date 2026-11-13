@@ -16,7 +16,7 @@ import re
 import sys
 from dataclasses import dataclass
 
-from db import get_connection
+from _testprod_guard import testprod_connection
 
 # Job-specific part numbers are job-number-prefixed (e.g. "28179-05-012",
 # or "28179-05-012_MIR" for a mirrored part) — the job number is always
@@ -121,7 +121,7 @@ def _normalize_qty(value) -> float:
 
 
 def compare(rfq_a: str, rfq_b: str) -> None:
-    conn = get_connection()
+    conn = testprod_connection()
     cursor = conn.cursor()
 
     lines_a = fetch_quote_lines(cursor, rfq_a)

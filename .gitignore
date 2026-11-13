@@ -9,6 +9,9 @@ __pycache__/
 *.pyd
 *.egg-info/
 *.spec
+# ...except the two tracked build recipes (see FEATURE_WORKFLOW.md)
+!bompush_service/bompush_watcher.spec
+!jl_check/JLCheck.spec
 .pytest_cache/
 .mypy_cache/
 .env

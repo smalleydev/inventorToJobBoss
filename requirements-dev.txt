@@ -1,0 +1,8 @@
+# Development and test tooling. Installs both apps' runtime deps too,
+# since the tests import modules from both.
+-r jl_check/requirements.txt
+-r bompush_service/requirements.txt
+
+pytest>=8.3
+pytest-qt>=4.4
+ruff>=0.11
