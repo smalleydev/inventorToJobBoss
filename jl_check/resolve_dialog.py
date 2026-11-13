@@ -323,6 +323,9 @@ class ResolveDialog(QDialog):
         if not term:
             return
 
+        # Deliberately NOT escaped (unlike jobboss_lookup's prefix
+        # search): engineers type % and _ as wildcards here, e.g.
+        # "28-%-003" or "TU%1.5", and the search depends on that.
         self._cursor.execute(
             f"SELECT TOP {MAX_SEARCH_RESULTS} Material, Description FROM Material "
             "WHERE Material LIKE ? OR Description LIKE ?",

@@ -105,10 +105,12 @@ def test_missing_cut_length_key_counts_as_zero():
     assert compute_traveler_state(r) == "Needs Length"
 
 
-@pytest.mark.xfail(reason="BUG: CutLengthIn=None does not trigger Needs Length "
-                          "(fix in bugfix phase)")
-def test_none_cut_length_needs_length():
-    assert compute_traveler_state(row(JobBossUofM="ft", CutLengthIn=None)) == "Needs Length"
+def test_none_cut_length_does_not_need_length():
+    """Intended: None means "no single length applies" (it's what
+    _combine_rows puts on nested lines), not "length missing". The
+    add-in writes CutLengthIn as a Double, so a missing length arrives
+    as 0, which is what triggers Needs Length."""
+    assert compute_traveler_state(row(JobBossUofM="ft", CutLengthIn=None)) == "Clean"
 
 
 def test_raw_stock_linear_category_needs_length_without_uofm():
